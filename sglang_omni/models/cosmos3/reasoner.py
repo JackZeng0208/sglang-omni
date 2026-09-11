@@ -6,14 +6,19 @@ from __future__ import annotations
 import asyncio
 import json
 import multiprocessing
+import shutil
+import tempfile
 import threading
 from concurrent.futures import CancelledError, Future
+from contextlib import ExitStack
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.messages import OutgoingMessage
 from sglang_omni.scheduling.threaded_simple_scheduler import ThreadedSimpleScheduler
+from sglang_omni.utils.checkpoint import resolve_checkpoint
 
 
 def build_chat_fields(payload: StagePayload, model: str, fields: set[str]) -> dict:
@@ -100,10 +105,12 @@ class NativeReasonerScheduler(ThreadedSimpleScheduler):
         serving_chat: Any,
         request_type: Any,
         max_concurrency: int = 8,
+        resources: ExitStack | None = None,
     ):
         self.engine = engine
         self.serving_chat = serving_chat
         self.request_type = request_type
+        self._resources = resources or ExitStack()
         self._native_futures: dict[str, Future] = {}
         self._native_lock = threading.Lock()
         self._closed = False
@@ -252,8 +259,10 @@ class NativeReasonerScheduler(ThreadedSimpleScheduler):
                 self._cancel_native_tasks(), self.engine.loop
             ).result(timeout=10)
         finally:
+            native_stopped = False
             try:
                 self.engine.shutdown()
+                native_stopped = True
             finally:
                 self.engine.loop.call_soon_threadsafe(self.engine.loop.stop)
                 self._loop_thread.join(timeout=5)
@@ -261,6 +270,8 @@ class NativeReasonerScheduler(ThreadedSimpleScheduler):
                     raise RuntimeError("The native tokenizer event loop did not stop")
                 self._executor.shutdown(wait=True, cancel_futures=True)
                 self.engine.loop.close()
+                if native_stopped:
+                    self._resources.close()
 
 
 def native_reasoner_kwargs(
@@ -299,6 +310,38 @@ def native_reasoner_kwargs(
     return kwargs
 
 
+def _reasoner_checkpoint(model_path: str, resources: ExitStack) -> str:
+    source = Path(resolve_checkpoint(model_path)).resolve()
+    config = json.loads((source / "config.json").read_text())
+    if config.get("model_type") == "cosmos3_edge" and config.get("architectures") == [
+        "Cosmos3EdgeForConditionalGeneration"
+    ]:
+        return str(source)
+
+    from sglang.multimodal_gen.configs.pipeline_configs.cosmos3 import (
+        is_edge_checkpoint,
+    )
+
+    if not is_edge_checkpoint(str(source)):
+        return str(source)
+
+    config.update(
+        model_type="cosmos3_edge",
+        architectures=["Cosmos3EdgeForConditionalGeneration"],
+    )
+    target = Path(tempfile.mkdtemp(prefix="cosmos3-edge-"))
+    try:
+        for entry in source.iterdir():
+            if entry.name != "config.json":
+                (target / entry.name).symlink_to(entry)
+        (target / "config.json").write_text(json.dumps(config) + "\n")
+    except BaseException:
+        shutil.rmtree(target)
+        raise
+    resources.callback(shutil.rmtree, target)
+    return str(target)
+
+
 def create_reasoner_scheduler(
     model_path: str,
     *,
@@ -316,12 +359,17 @@ def create_reasoner_scheduler(
     kwargs = native_reasoner_kwargs(
         model_path, gpu_id, server_args_overrides, runtime_gpu_ids
     )
+    resources = ExitStack()
+    kwargs["model_path"] = _reasoner_checkpoint(model_path, resources)
+    kwargs.setdefault("served_model_name", model_path.partition("@")[0])
     engine = Engine(**kwargs)
     try:
         service = OpenAIServingChat(engine.tokenizer_manager, engine.template_manager)
         return NativeReasonerScheduler(
-            engine, service, ChatCompletionRequest, max_concurrency
+            engine, service, ChatCompletionRequest, max_concurrency, resources
         )
     except BaseException:
         engine.shutdown()
+        if not engine.loop.is_running():
+            resources.close()
         raise

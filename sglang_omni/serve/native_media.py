@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -35,10 +36,13 @@ def mount_native_media_app(
     native_app: FastAPI,
     *,
     runtime_failure: asyncio.Future | None = None,
+    stop_runtime: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     """Preserve native routing and run its lifespan before worker shutdown."""
     if runtime_failure is not None:
         native_app.state.scheduler_failure = runtime_failure
+    if stop_runtime is not None:
+        native_app.state.stop_runtime = stop_runtime
     previous_lifespan = app.router.lifespan_context
 
     @asynccontextmanager

@@ -40,6 +40,7 @@ def prepare_native_media_app(
     )
 
     from sglang_omni.models.cosmos3.stages import native_server_kwargs
+    from sglang_omni.utils.checkpoint import resolve_checkpoint
 
     kwargs: dict[str, Any] = dict(
         getattr(stage.factory, "server_args_overrides", None) or {}
@@ -52,13 +53,19 @@ def prepare_native_media_app(
     kwargs.setdefault("nccl_port", _unused_port(excluded))
     output_dir = str(Path(getattr(stage.factory, "output_dir", "outputs")).resolve())
     kwargs.update(host=host, port=port, strict_ports=True, output_path=output_dir)
-    native_args = ServerArgs.from_kwargs(
-        **native_server_kwargs(
-            config.model_path, stage.gpu, kwargs, stage.runtime_gpu_ids
-        )
+    native_kwargs = native_server_kwargs(
+        config.model_path, stage.gpu, kwargs, stage.runtime_gpu_ids
     )
+    native_kwargs["model_path"] = resolve_checkpoint(config.model_path)
+    native_kwargs.setdefault("served_model_name", config.model_path.partition("@")[0])
+    native_args = ServerArgs.from_kwargs(**native_kwargs)
     # Explicit ports make startup fail if another process takes them.
     # Both clients must address the same scheduler, never silently choose another.
     stage.factory.server_args_overrides = kwargs
     set_global_server_args(native_args)
-    return create_app(native_args)
+    app = create_app(native_args)
+    if getattr(getattr(native_args, "pipeline_config", None), "is_edge", False):
+        from sglang_omni.models.cosmos3.action import router
+
+        app.router.routes[:0] = router.routes
+    return app

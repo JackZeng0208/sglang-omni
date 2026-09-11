@@ -476,7 +476,10 @@ async def _run_server(
                 from sglang_omni.serve.native_media import mount_native_media_app
 
                 mount_native_media_app(
-                    app, native_media_app, runtime_failure=runtime_failure
+                    app,
+                    native_media_app,
+                    runtime_failure=runtime_failure,
+                    stop_runtime=mp_runner.stop,
                 )
             await _serve_with_failure_watch(server, [runtime_failure])
         finally:

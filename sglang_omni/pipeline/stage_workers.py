@@ -388,25 +388,41 @@ class StageGroup:
         join_timeout: float = 30.0,
         before_signal: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
+        errors: list[tuple[str, Exception]] = []
+        stopped = False
         try:
             for spec, p in zip(self.process_specs, self._processes):
-                p.join(timeout=join_timeout)
-                if p.is_alive():
-                    logger.warning(
-                        "Terminating stuck process %s (pid=%s)",
-                        p.name,
-                        p.pid,
-                    )
-                    if before_signal is not None:
-                        await before_signal(spec.process_name)
-                    p.terminate()
-                    p.join(timeout=5)
+                try:
+                    p.join(timeout=join_timeout)
                     if p.is_alive():
-                        p.kill()
-                        p.join(timeout=2)
+                        logger.warning(
+                            "Terminating stuck process %s (pid=%s)",
+                            p.name,
+                            p.pid,
+                        )
+                        if before_signal is not None:
+                            await before_signal(spec.process_name)
+                        p.terminate()
+                        p.join(timeout=5)
+                        if p.is_alive():
+                            p.kill()
+                            p.join(timeout=2)
+                    if p.is_alive():
+                        raise RuntimeError(
+                            f"Process {p.name} (pid={p.pid}) is still alive"
+                        )
+                except Exception as exc:
+                    errors.append((spec.process_name, exc))
+            if errors:
+                details = "; ".join(f"{name}: {exc}" for name, exc in errors)
+                raise RuntimeError(
+                    f"StageGroup {self.group_name} shutdown failed: {details}"
+                ) from errors[0][1]
+            stopped = True
         finally:
             self.close_control_channels()
-            self._processes.clear()
+            if stopped:
+                self._processes.clear()
             self._ready_events.clear()
             self._startup_error_channels.clear()
 
