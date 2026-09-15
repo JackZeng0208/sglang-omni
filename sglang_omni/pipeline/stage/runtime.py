@@ -23,17 +23,18 @@ import torch
 
 from sglang_omni.comm import stage_io
 from sglang_omni.comm.data_ref import DataKind, DataRef
-from sglang_omni.comm.engine import CommEngine
+from sglang_omni.comm.engine import CommEngine, KVTransferCancelled, KVTransferRejected
+from sglang_omni.comm.kv_transfer import KVPageTransfer
 from sglang_omni.comm.router import CommRouter
 from sglang_omni.pipeline.replicas import ReplicaTopology
 from sglang_omni.pipeline.stage.input import DirectInput, InputHandler
 from sglang_omni.pipeline.stage.stream_queue import StreamItem, StreamQueue
 from sglang_omni.pipeline.tp_control import TPLeaderFanout, TPWorkMessage
+from sglang_omni.platforms import current_platform
 from sglang_omni.profiler.comm_trace import emit as _comm_trace
 from sglang_omni.profiler.event_recorder import emit as _emit_event
 from sglang_omni.profiler.event_recorder import get_recorder as _get_recorder
 from sglang_omni.profiler.event_recorder import set_active_stage as _set_active_stage
-from sglang_omni.profiler.torch_profiler import TorchProfiler
 from sglang_omni.proto import (
     AdminMessage,
     AdminResult,
@@ -51,6 +52,8 @@ from sglang_omni.proto import (
 )
 from sglang_omni.relay.base import Relay
 from sglang_omni.scheduling.messages import IncomingMessage
+
+TorchProfiler = current_platform.get_torch_profiler()
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +153,10 @@ class Stage:
             rank_endpoints=rank_endpoints,
             task_done_callback=self._on_background_task_done,
         )
+        for pool, receiver in getattr(scheduler, "kv_registrations", ()):
+            self._comm.register_kv_pool(pool)
+            if receiver is not None:
+                self._comm.register_kv_receiver(pool.pool_id, receiver)
 
         self._running = False
         self._aborted: set[str] = set()
@@ -1104,7 +1111,18 @@ class Stage:
                 continue
 
             for batch_index in range(_OUTBOX_DRAIN_BATCH_SIZE):
-                if out.request_id in self._active_requests:
+                if out.type == "admitted":
+                    if out.request_id not in self._aborted:
+                        self._record_replica_bindings(
+                            out.request_id, (out.metadata or {}).get("replica_bindings")
+                        )
+                        self._active_requests.add(out.request_id)
+                elif out.type == "kv_transfer":
+                    if out.request_id in self._active_requests:
+                        self._launch_kv_transfer(out.data)
+                    else:
+                        self._discard_kv_transfer(out.data)
+                elif out.request_id in self._active_requests:
                     if out.type == "result":
                         await self._route_result(out.request_id, out.data)
                     elif out.type == "stream":
@@ -1136,6 +1154,8 @@ class Stage:
                             )
                     elif out.type == "error":
                         await self._send_failure(out.request_id, str(out.data))
+                elif out.type == "result":
+                    self._release_scheduler_result(out.data, delivered=False)
 
                 if batch_index + 1 >= _OUTBOX_DRAIN_BATCH_SIZE:
                     await asyncio.sleep(0)
@@ -1158,18 +1178,134 @@ class Stage:
                 continue
 
             if out.type == "result":
+                self._release_scheduler_result(out.data, delivered=False)
                 self._clear_request_state(out.request_id)
             elif out.type == "stream":
                 continue
+            elif out.type == "admitted":
+                self._active_requests.add(out.request_id)
+            elif out.type == "kv_transfer":
+                raise RuntimeError(
+                    f"TP follower stage {self.name} cannot publish a KV transfer"
+                )
             elif out.type == "error":
                 raise RuntimeError(
                     f"TP follower stage {self.name} received scheduler error: {out.data}"
                 )
 
+    def _launch_kv_transfer(self, transfer: KVPageTransfer) -> None:
+        started = False
+
+        async def send():
+            nonlocal started
+            started = True
+            await self._send_kv_transfer(transfer)
+
+        def done(task):
+            if not started:
+                self._discard_kv_transfer(transfer)
+            self._receive_tasks.discard(task)
+            self._on_background_task_done(task, f"KV transfer {transfer.request_id}")
+
+        task = asyncio.create_task(send())
+        self._receive_tasks.add(task)
+        task.add_done_callback(done)
+
+    async def _send_kv_transfer(self, transfer: KVPageTransfer) -> None:
+        if not isinstance(transfer, KVPageTransfer):
+            raise TypeError(
+                "kv_transfer outbox messages require KVPageTransfer data, got "
+                f"{type(transfer).__name__}"
+            )
+        lease = transfer.lease
+        try:
+            if transfer.request_id in self._aborted:
+                return
+            to_stage = self._resolve_target_instance(
+                transfer.request_id, transfer.to_stage
+            )
+            target_pool_id = (
+                transfer.target_pool_id
+                if to_stage == transfer.to_stage
+                else f"{to_stage}:kv"
+            )
+            metadata = {
+                **transfer.metadata,
+                "replica_bindings": self._replica_bindings.get(transfer.request_id),
+            }
+            # From here CommEngine owns the lease, including cancellation and
+            # copies retained while their remote completion is uncertain.
+            lease = None
+            await self._comm.send_kv_pages(
+                request_id=transfer.request_id,
+                source_pool_id=transfer.source_pool_id,
+                source_page_indices=transfer.source_page_indices,
+                target_pool_id=target_pool_id,
+                to_stage=to_stage,
+                metadata=metadata,
+                transfer_id=transfer.transfer_id,
+                lease=transfer.lease,
+            )
+        except KVTransferCancelled:
+            # Request cleanup is terminal for this transfer, but not for the
+            # stage's long-lived outbox drain.
+            return
+        except Exception as exc:
+            logger.exception(
+                "Stage %s KV transfer failed for %s",
+                self.name,
+                transfer.request_id,
+            )
+            await self._send_failure(transfer.request_id, _error_text(exc))
+            return
+        finally:
+            if lease is not None:
+                lease.release()
+            self._clear_request_state(transfer.request_id)
+
+    @staticmethod
+    def _discard_kv_transfer(transfer: Any) -> None:
+        if isinstance(transfer, KVPageTransfer) and transfer.lease is not None:
+            transfer.lease.release()
+
+    def _release_scheduler_result(self, result: Any, *, delivered: bool) -> None:
+        """Settle optional scheduler-owned resources after routing or dropping."""
+        release = getattr(self.scheduler, "release_result", None)
+        if release is not None:
+            release(result, delivered=delivered)
+
     async def _route_result(self, request_id: str, result: Any) -> None:
-        """Route a completed result to next stage(s) or complete at coordinator."""
+        """Route a result and settle its resources even when routing fails."""
+        delivered = False
+
+        def on_submitted() -> None:
+            nonlocal delivered
+            delivered = True
+
+        try:
+            await self._route_scheduler_result(request_id, result, on_submitted)
+        except BaseException:
+            try:
+                self._release_scheduler_result(result, delivered=delivered)
+            except Exception:
+                logger.exception(
+                    "Stage %s failed to release result for %s", self.name, request_id
+                )
+            raise
+        self._release_scheduler_result(result, delivered=delivered)
+
+    async def _route_scheduler_result(
+        self, request_id: str, result: Any, on_submitted: Callable[[], None]
+    ) -> None:
+        """Route while recording transport acceptance before local cleanup."""
         if not self._owns_external_io:
             self._clear_request_state(request_id)
+            return
+        next_stages = self.get_next(request_id, result)
+        claim_result = getattr(self.scheduler, "claim_result", None)
+        if claim_result is not None and not claim_result(
+            result, terminal=next_stages is None
+        ):
             return
         # Send stream done to the active stream targets for this request.
         stream_targets = self._stream_targets
@@ -1189,7 +1325,6 @@ class Stage:
                 is_done=True,
             )
 
-        next_stages = self.get_next(request_id, result)
         if next_stages is None:
             # Terminal: notify coordinator
             _emit_event(
@@ -1198,14 +1333,19 @@ class Stage:
                 event_name="stage_complete",
                 metadata={"terminal": True},
             )
-            await self.control_plane.send_complete(
-                CompleteMessage(
-                    request_id=request_id,
-                    from_stage=self.name,
-                    success=True,
-                    result=result.data if isinstance(result, StagePayload) else result,
-                )
+            message = CompleteMessage(
+                request_id=request_id,
+                from_stage=self.name,
+                success=True,
+                result=result.data if isinstance(result, StagePayload) else result,
             )
+            if getattr(self.scheduler, "release_result", None) is None:
+                await self.control_plane.send_complete(message)
+            else:
+                await self.control_plane.send_complete(
+                    message, on_submitted=on_submitted
+                )
+            on_submitted()
         else:
             if isinstance(next_stages, str):
                 next_stages = [next_stages]
@@ -1225,6 +1365,7 @@ class Stage:
                     allow_projected_local_object=not is_single_target,
                     stream_targets_for_request=stream_targets_for_request,
                 )
+                on_submitted()
 
         self._clear_request_state(request_id)
 
@@ -1825,6 +1966,10 @@ class Stage:
             return
         exc = task.exception()
         if exc is None:
+            return
+        if isinstance(exc, KVTransferRejected):
+            # The ACK watcher also propagates this to _send_kv_transfer(), which
+            # reports the request failure even if the local abort arrives later.
             return
         logger.exception(
             "Stage %s %s task crashed",

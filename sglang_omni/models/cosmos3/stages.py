@@ -16,19 +16,28 @@ from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 
 
-def build_sampling_params(payload: StagePayload, output_dir: str) -> dict[str, Any]:
-    inputs = payload.request.inputs
-    if isinstance(inputs, str):
-        params = {"prompt": inputs}
-    elif isinstance(inputs, dict):
-        params = dict(inputs)
-    else:
-        raise ValueError("Generation inputs must be a prompt or native sampling fields")
-    overrides = payload.request.params.get("diffusion", {})
+def resolve_generation_options(
+    request_params: dict[str, Any], inputs: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Lower common SDK seeds and native overrides with one precedence rule."""
+    params = {}
+    if request_params.get("seed") is not None:
+        params["seed"] = request_params["seed"]
+    params.update(inputs or {})
+    stage_sampling = request_params.get("stage_sampling")
+    if stage_sampling is not None:
+        if not isinstance(stage_sampling, dict):
+            raise ValueError("stage_sampling must be a mapping")
+        generation = stage_sampling.get("generation", {})
+        if not isinstance(generation, dict):
+            raise ValueError("Generation stage sampling must be a mapping")
+        if generation.get("seed") is not None:
+            params["seed"] = generation["seed"]
+    overrides = request_params.get("diffusion", {})
     if not isinstance(overrides, dict):
         raise ValueError("diffusion parameters must be a mapping")
     params.update(overrides)
-    stage_params = payload.request.params.get("stage_params")
+    stage_params = request_params.get("stage_params")
     if stage_params is not None:
         if not isinstance(stage_params, dict):
             raise ValueError("stage_params must be a mapping")
@@ -36,6 +45,16 @@ def build_sampling_params(payload: StagePayload, output_dir: str) -> dict[str, A
         if not isinstance(generation, dict):
             raise ValueError("Generation stage parameters must be a mapping")
         params.update(generation)
+    return params
+
+
+def build_sampling_params(payload: StagePayload, output_dir: str) -> dict[str, Any]:
+    inputs = payload.request.inputs
+    if isinstance(inputs, str):
+        inputs = {"prompt": inputs}
+    elif not isinstance(inputs, dict):
+        raise ValueError("Generation inputs must be a prompt or native sampling fields")
+    params = resolve_generation_options(payload.request.params, inputs)
     if not isinstance(params.get("prompt"), str) or not params["prompt"].strip():
         raise ValueError("Generation requires a nonempty prompt")
     if payload.request.params.get("stream"):
@@ -87,7 +106,7 @@ class NativeGenerationScheduler(SimpleScheduler):
             request = self._native_requests.get(request_id)
             if request is not None:
                 request.cancelled.set()
-                if not request.running:
+                if not request.running and not request.delivering:
                     self._native_requests.pop(request_id)
                     directory = request.directory
         if directory is not None:
@@ -96,21 +115,54 @@ class NativeGenerationScheduler(SimpleScheduler):
     def _emit_result(self, request_id, result, outbox) -> None:
         directory = None
         with self._abort_lock:
-            request = self._native_requests.pop(request_id, None)
+            request = self._native_requests.get(request_id)
             if request_id in self._aborted:
                 self._aborted.discard(request_id)
-                if request is not None:
+                if request is not None and request.result is result:
+                    self._native_requests.pop(request_id)
                     directory = request.directory
             else:
                 super()._emit_result(request_id, result, outbox)
         if directory is not None:
             self._remove_request_directory(directory)
 
-    def stop(self) -> None:
+    def claim_result(self, result: StagePayload, *, terminal: bool) -> bool:
+        if not terminal:
+            raise ValueError(
+                "Saved native media requires terminal delivery; "
+                "use inline media for inter-stage routing"
+            )
         with self._abort_lock:
-            for request in self._native_requests.values():
+            request = self._native_requests.get(result.request_id)
+            if request is None or request.result is not result:
+                return False
+            request.delivering = True
+            return True
+
+    def release_result(self, result: StagePayload, *, delivered: bool) -> None:
+        directory = None
+        with self._abort_lock:
+            request = self._native_requests.get(result.request_id)
+            if request is not None and request.result is result:
+                self._native_requests.pop(result.request_id)
+                if not delivered:
+                    directory = request.directory
+        if directory is not None:
+            self._remove_request_directory(directory)
+
+    def stop(self) -> None:
+        directories = []
+        with self._abort_lock:
+            for request_id, request in list(self._native_requests.items()):
                 request.cancelled.set()
-        super().stop()
+                if not request.running and not request.delivering:
+                    self._native_requests.pop(request_id)
+                    directories.append(request.directory)
+        try:
+            super().stop()
+        finally:
+            for directory in directories:
+                self._remove_request_directory(directory)
 
     def _generate(self, payload: StagePayload) -> StagePayload:
         params = build_sampling_params(payload, self.output_dir)
@@ -159,9 +211,10 @@ class NativeGenerationScheduler(SimpleScheduler):
         finally:
             with self._abort_lock:
                 request.running = False
+                request.result = payload if succeeded else None
                 cleanup = not succeeded or request.cancelled.is_set()
-                if cleanup:
-                    self._native_requests.pop(payload.request_id, None)
+                if cleanup and self._native_requests.get(payload.request_id) is request:
+                    self._native_requests.pop(payload.request_id)
             if cleanup:
                 self._remove_request_directory(request.directory)
 
@@ -171,6 +224,8 @@ class _GenerationRequest:
     cancelled: threading.Event
     directory: Path
     running: bool = True
+    delivering: bool = False
+    result: StagePayload | None = None
 
 
 def native_server_kwargs(

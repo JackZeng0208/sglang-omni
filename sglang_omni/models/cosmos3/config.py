@@ -8,9 +8,6 @@ from sglang_omni.config import FactoryArgs, PipelineConfig, StageConfig
 
 class Cosmos3PipelineConfig(PipelineConfig):
     architecture: ClassVar[str] = "Cosmos3ForConditionalGeneration"
-    architecture_aliases: ClassVar[tuple[str, ...]] = (
-        "Cosmos3EdgeForConditionalGeneration",
-    )
 
     model_path: str
     stages: list[StageConfig] = [
