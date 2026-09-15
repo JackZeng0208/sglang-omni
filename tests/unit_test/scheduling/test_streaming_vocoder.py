@@ -298,6 +298,8 @@ def test_registry_lifecycle_and_hook_call_order() -> None:
 
     scheduler.calls.clear()
     scheduler._on_done("r")
+    assert scheduler.calls == []
+    assert _drain(scheduler) == []
     scheduler._on_streaming_new_request("r", _payload())
     messages = _drain(scheduler)
     assert scheduler.calls == [
@@ -346,6 +348,43 @@ def test_stream_done_before_payload_is_buffered() -> None:
     assert [m.type for m in messages] == ["stream", "result"]
     np.testing.assert_array_equal(_waveform(messages[0].data), [7.0])
     assert scheduler._stream_states == {}
+    assert scheduler._emitted_stream_ids == set()
+    assert "r" not in scheduler._pending_done
+
+
+def test_stream_done_before_payload_can_opt_in_to_early_tail() -> None:
+    class EarlyTailVocoder(_FakeStreamingVocoder):
+        def on_stream_done_before_payload(self, request_id):
+            state = self._stream_states[request_id]
+            waveform = self.decode_delta(request_id, state, is_final=True)
+            if waveform is None:
+                return []
+            self._mark_stream_emitted(request_id)
+            return [self._stream_chunk_message(request_id, waveform)]
+
+    scheduler = EarlyTailVocoder(threshold=10)
+    scheduler._on_chunk("r", _item([7]))
+    scheduler._on_done("r")
+    assert "r" in scheduler._pending_done
+    messages = _drain(scheduler)
+    assert [message.type for message in messages] == ["stream"]
+    np.testing.assert_array_equal(_waveform(messages[0].data), [7.0])
+    assert "final:r" not in scheduler.calls
+    scheduler._on_done("r")
+    assert _drain(scheduler) == []
+
+    scheduler._on_streaming_new_request("r", _payload())
+    messages = _drain(scheduler)
+    assert [message.type for message in messages] == ["result"]
+    assert messages[0].data.data == {
+        "modality": "audio",
+        "sample_rate": SAMPLE_RATE,
+        "frames": 1,
+    }
+    assert "fallback:r" not in scheduler.calls
+    assert scheduler._stream_states == {}
+    assert scheduler._emitted_stream_ids == set()
+    assert "r" not in scheduler._pending_done
 
 
 def test_nothing_emitted_fallback_decodes_whole_utterance() -> None:
@@ -563,6 +602,38 @@ def test_coalescing_single_chunk_path_pumps_same_backbone() -> None:
     ]
     assert [(m.request_id, m.type) for m in messages] == [("a", "stream")]
     assert messages[0].metadata == {"modality": "audio"}
+
+
+def test_pump_one_step_reports_nothing_ready_then_runs_one_step() -> None:
+    scheduler = _CoalescingFakeVocoder(threshold=1)
+    assert scheduler._pump_one_step() is None
+    scheduler._run_ready_step()
+    assert _drain(scheduler) == []
+
+    scheduler._ingest_stream_item("a", _item([1]))
+    scheduler._ingest_stream_item("b", _item([2]))
+    scheduler._run_ready_step()
+    assert [(m.request_id, m.type) for m in _drain(scheduler)] == [
+        ("a", "stream"),
+        ("b", "stream"),
+    ]
+    assert scheduler._pump_one_step() is None
+
+
+def test_run_ready_step_failure_aborts_participants_off_the_lock() -> None:
+    cleaned: list[str] = []
+    scheduler = _CoalescingFakeVocoder(
+        threshold=1, fail_steps=True, abort_callback=cleaned.append
+    )
+    scheduler._ingest_stream_item("a", _item([1]))
+
+    scheduler._run_ready_step()
+
+    messages = _drain(scheduler)
+    assert [(m.request_id, m.type) for m in messages] == [("a", "error")]
+    assert scheduler._is_aborted("a")
+    assert scheduler._stream_states == {}
+    assert cleaned == ["a"]
 
 
 def test_step_failure_aborts_every_participant() -> None:

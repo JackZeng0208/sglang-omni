@@ -671,7 +671,7 @@ class MultiProcessPipelineRunner:
             if self._mps is not None:
                 process_start_attempts = self._process_start_attempts()
             try:
-                await self._cleanup_on_failure()
+                await _finish_despite_cancellation(self._cleanup_on_failure())
             finally:
                 if self._mps is not None:
                     try:
@@ -848,6 +848,25 @@ class MultiProcessPipelineRunner:
     async def _cleanup_on_failure(self) -> None:
         """Best-effort cleanup after a failed start()."""
         for group in [g for wave in self._shutdown_waves() for g in wave]:
+            if group.is_ready and self._coordinator is not None:
+                # Routes are registered only after all groups start successfully.
+                # Ready stages must stop their schedulers and process finalizers.
+                for name, endpoint in group.stage_control_endpoints.items():
+                    try:
+                        await asyncio.wait_for(
+                            self._coordinator.control_plane.send_shutdown(
+                                name, endpoint
+                            ),
+                            timeout=1.0,
+                        )
+                    except Exception as exc:
+                        logger.warning("Startup shutdown for %s failed: %s", name, exc)
+                await group.shutdown(
+                    before_signal=(
+                        self._retire_mps_clients if self._mps is not None else None
+                    )
+                )
+                continue
             for spec, p in zip(group.process_specs, group.processes):
                 if p.is_alive():
                     if self._mps is not None:

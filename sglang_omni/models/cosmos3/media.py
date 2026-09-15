@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 import socket
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ def prepare_native_media_app(
     if not isinstance(stage.gpu, int):
         raise ValueError("The native media stage requires one explicit GPU")
     from sglang.multimodal_gen.runtime.entrypoints.http_server import create_app
+    from sglang.multimodal_gen.runtime.scheduler_client import AsyncSchedulerClient
     from sglang.multimodal_gen.runtime.server_args import (
         ServerArgs,
         set_global_server_args,
@@ -41,10 +43,19 @@ def prepare_native_media_app(
 
     from sglang_omni.models.cosmos3.stages import native_server_kwargs
 
+    if (
+        "worker_failure"
+        not in inspect.signature(AsyncSchedulerClient.initialize).parameters
+    ):
+        raise RuntimeError(
+            "Cosmos3 native media requires SGLang scheduler owner-failure "
+            "support. Install the native lifecycle prerequisites before serving."
+        )
+
     kwargs: dict[str, Any] = dict(
         getattr(stage.factory, "server_args_overrides", None) or {}
     )
-    excluded = {port}
+    excluded = {port, port + 1}
     kwargs.setdefault("scheduler_port", _unused_port(excluded))
     excluded.update({kwargs["scheduler_port"], kwargs["scheduler_port"] + 1})
     kwargs.setdefault("master_port", _unused_port(excluded))
