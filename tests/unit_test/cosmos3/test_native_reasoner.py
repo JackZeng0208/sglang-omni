@@ -213,6 +213,10 @@ def test_native_text_and_vision_parameters_preserved():
     [
         payload(inputs=[]),
         payload(inputs=[1, 2]),
+        payload(inputs={"messages": [1]}),
+        payload(inputs={"messages": [None], "images": ["image.png"]}),
+        payload(inputs={"messages": ["bad"], "videos": ["video.mp4"]}),
+        payload(inputs={"messages": [{"role": "user", "content": "x"}, 1]}),
         payload(inputs={"messages": [], "images": ["image.png"]}),
         payload(stage_params=[]),
         payload(stage_sampling=[]),
@@ -278,6 +282,10 @@ def test_stream_preserves_unicode_without_duplicate_terminal_text():
                     ),
                 )
             )
+
+        assert sum(chunk.finish_reason is not None for chunk in chunks) == 1
+        assert chunks[-1].finish_reason == "stop"
+        assert all(chunk.text for chunk in chunks[:-1])
 
         class StreamClient(Client):
             async def generate(self, request, request_id=None):

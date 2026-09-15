@@ -14,14 +14,8 @@ from sglang_omni.pipeline.stage_workers import (
 )
 
 
-def _signal_ready(event):
-    event.set()
-
-
 def _own_child(spec, ready_event, error_channel):
-    child = multiprocessing.get_context("spawn").Process(
-        target=_signal_ready, args=(ready_event,)
-    )
+    child = multiprocessing.get_context("spawn").Process(target=ready_event.set)
     try:
         child.start()
     except AssertionError as exc:

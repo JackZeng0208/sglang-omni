@@ -12,9 +12,6 @@ class Cosmos3PipelineConfig(PipelineConfig):
     native_media_factory_path: ClassVar[str] = (
         "sglang_omni.models.cosmos3.media.prepare_native_media_app"
     )
-    architecture_aliases: ClassVar[tuple[str, ...]] = (
-        "Cosmos3EdgeForConditionalGeneration",
-    )
 
     model_path: str
     stages: list[StageConfig] = [

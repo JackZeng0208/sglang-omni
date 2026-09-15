@@ -72,6 +72,9 @@ from sglang_omni.serve.generation_params import (
     record_explicit_generation_params as _record_explicit_generation_params,
 )
 from sglang_omni.serve.openai_errors import (
+    http_status_from_error as _http_status_from_error,
+)
+from sglang_omni.serve.openai_errors import (
     is_bad_request_error as _is_bad_request_error,
 )
 from sglang_omni.serve.protocol import (
@@ -125,7 +128,7 @@ from sglang_omni.serve.streaming import (
 from sglang_omni.serve.streaming import (
     close_async_iterator_if_supported as _close_async_iterator_if_supported,
 )
-from sglang_omni.serve.transcriptions import register_transcriptions
+from sglang_omni.serve.transcriptions import LongAudioAdmission, register_transcriptions
 from sglang_omni.serve.translations import register_translations
 
 logger = logging.getLogger(__name__)
@@ -258,6 +261,9 @@ def create_app(
     app.state.architectures = [a for a in (architectures or []) if a]
     app.state.supports_audio_translation = supports_audio_translation
     app.state.audio_chunking = audio_chunking or ResolvedAudioChunking.disabled()
+    app.state.long_audio_admission = LongAudioAdmission(
+        app.state.audio_chunking.max_concurrent_long_audio_requests
+    )
     app.state.realtime_enabled = enable_realtime
     app.state.supports_realtime_audio_output = supports_realtime_audio_output
     app.state.realtime_transcription = realtime_transcription
@@ -688,15 +694,17 @@ def _register_chat_completions(app: FastAPI) -> None:
 
         if req.stream:
             return _ClosableStreamingResponse(
-                _chat_stream(
-                    client,
-                    gen_req,
-                    request_id,
-                    response_id,
-                    created,
-                    model,
-                    req,
-                    audio_format,
+                _chat_stream_errors(
+                    _chat_stream(
+                        client,
+                        gen_req,
+                        request_id,
+                        response_id,
+                        created,
+                        model,
+                        req,
+                        audio_format,
+                    )
                 ),
                 media_type="text/event-stream",
             )
@@ -782,6 +790,27 @@ async def _chat_non_stream(
     )
 
     return JSONResponse(content=response.model_dump())
+
+
+async def _chat_stream_errors(stream: AsyncIterator[str]) -> AsyncIterator[str]:
+    """Report errors after streaming headers while closing the owned iterator."""
+    async with aclosing(stream):
+        try:
+            async for frame in stream:
+                yield frame
+        except Exception as exc:
+            status = _http_status_from_error(exc)
+            if status >= 500:
+                logger.exception("Error generating chat stream")
+            error = {
+                "error": {
+                    "message": str(exc),
+                    "type": "invalid_request_error" if status < 500 else "server_error",
+                    "code": status,
+                }
+            }
+            yield f"data: {json.dumps(error)}\n\n"
+            yield f"data: {STREAM_DONE_SENTINEL}\n\n"
 
 
 async def _chat_stream(
@@ -992,7 +1021,7 @@ def _build_chat_generate_request(req: ChatCompletionRequest) -> GenerateRequest:
         _explicit_generation_params(req),
     )
 
-    extra_params: dict[str, Any] = {}
+    extra_params: dict[str, Any] = dict(req.model_extra or {})
     for field_name, value in (
         ("talker_temperature", req.talker_temperature),
         ("talker_top_p", req.talker_top_p),
@@ -1225,7 +1254,6 @@ def _register_realtime(app: FastAPI) -> None:
         model_name=model_name,
         supports_audio_output=app.state.supports_realtime_audio_output,
         transcription_config=app.state.realtime_transcription,
-        audio_chunking=app.state.audio_chunking,
         smart_turn_model=smart_turn_model,
     )
     app.state.realtime_manager = manager

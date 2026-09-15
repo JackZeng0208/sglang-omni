@@ -9,6 +9,7 @@ import logging
 import multiprocessing
 import os
 import queue
+import signal
 import sys
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -273,6 +274,13 @@ class StageGroup:
     def processes(self) -> list[multiprocessing.Process]:
         return list(self._processes)
 
+    @property
+    def is_ready(self) -> bool:
+        """Every planned process has completed stage startup."""
+        return len(self._ready_events) == self.process_count and all(
+            event.is_set() for event in self._ready_events
+        )
+
     def process_start_attempts(self) -> set[str]:
         """Return process names whose ``Process.start()`` was called."""
         return set(self._process_start_attempts)
@@ -411,6 +419,10 @@ class StageGroup:
             self._startup_error_channels.clear()
 
 
+def _exit_on_sigterm(signum, frame) -> None:
+    raise SystemExit(128 + signum)
+
+
 def stage_process_main(
     spec: StageWorkerProcessSpec,
     ready_event: multiprocessing.Event,
@@ -427,7 +439,11 @@ def stage_process_main(
         raise ValueError(f"Process {spec.process_name!r} requires at least one stage")
     log = logging.getLogger(f"stage_workers.{spec.process_name}")
 
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
     try:
+        if previous_sigterm == signal.SIG_DFL:
+            # Startup rollback must run registered native process finalizers.
+            signal.signal(signal.SIGTERM, _exit_on_sigterm)
         for stage_spec in spec.stage_specs:
             _prepare_accelerator_environment(stage_spec, log)
         apply_gpu_compat_env_defaults()
@@ -459,6 +475,9 @@ def stage_process_main(
         if startup_error_channel is not None:
             startup_error_channel.put(traceback_text)
         sys.exit(1)
+    finally:
+        if signal.getsignal(signal.SIGTERM) is _exit_on_sigterm:
+            signal.signal(signal.SIGTERM, previous_sigterm)
 
 
 def _run_process(

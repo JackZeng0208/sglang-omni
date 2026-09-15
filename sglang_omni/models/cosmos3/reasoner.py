@@ -11,6 +11,7 @@ from concurrent.futures import CancelledError, Future
 from copy import deepcopy
 from typing import Any
 
+from sglang_omni.admission import InvalidRequestError
 from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.messages import OutgoingMessage
 from sglang_omni.scheduling.threaded_simple_scheduler import ThreadedSimpleScheduler
@@ -24,6 +25,8 @@ def build_chat_fields(payload: StagePayload, model: str, fields: set[str]) -> di
         messages = inputs
     elif isinstance(inputs, dict) and isinstance(inputs.get("messages"), list):
         messages = deepcopy(inputs["messages"])
+        if not all(isinstance(message, dict) for message in messages):
+            raise ValueError("Reasoner messages must be mappings")
         media = {key: inputs.get(key) for key in ("images", "videos", "audios")}
         if media["audios"] or any(key.startswith("video_") for key in inputs):
             raise ValueError(
@@ -150,14 +153,16 @@ class NativeReasonerScheduler(ThreadedSimpleScheduler):
                 self._native_futures.pop(payload.request_id, None)
 
     async def _complete(self, payload: StagePayload) -> StagePayload:
-        fields = build_chat_fields(
-            payload,
-            self.engine.tokenizer_manager.served_model_name,
-            set(self.request_type.model_fields),
-        )
-        response = await self.serving_chat.handle_request(
-            self.request_type(**fields), None
-        )
+        try:
+            fields = build_chat_fields(
+                payload,
+                self.engine.tokenizer_manager.served_model_name,
+                set(self.request_type.model_fields),
+            )
+            request = self.request_type(**fields)
+        except ValueError as exc:
+            raise InvalidRequestError(str(exc)) from exc
+        response = await self.serving_chat.handle_request(request, None)
         if hasattr(response, "body_iterator"):
             text_parts = []
             usage = None
@@ -175,21 +180,17 @@ class NativeReasonerScheduler(ThreadedSimpleScheduler):
                     usage = event.get("usage") or usage
                     for choice in event.get("choices", []):
                         delta = choice.get("delta", {}).get("content") or ""
+                        finish_reason = choice.get("finish_reason") or finish_reason
                         if delta:
                             text_parts.append(delta)
-                        finish_reason = choice.get("finish_reason") or finish_reason
-                        self.outbox.put(
-                            OutgoingMessage(
-                                payload.request_id,
-                                "stream",
-                                {
-                                    "text": delta,
-                                    "modality": "text",
-                                    "usage": usage,
-                                    "finish_reason": choice.get("finish_reason"),
-                                },
+                            # The stage result owns completion and final usage.
+                            self.outbox.put(
+                                OutgoingMessage(
+                                    payload.request_id,
+                                    "stream",
+                                    {"text": delta, "modality": "text"},
+                                )
                             )
-                        )
                 payload.data = {
                     "text": "".join(text_parts),
                     "modality": "text",
