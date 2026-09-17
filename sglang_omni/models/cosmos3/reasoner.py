@@ -205,6 +205,8 @@ class NativeReasonerScheduler(ThreadedSimpleScheduler):
         else:
             data = _response_dict(response)
             if "error" in data or "choices" not in data:
+                if getattr(response, "status_code", None) == 400:
+                    raise InvalidRequestError(str(data.get("message", data)))
                 raise ValueError(str(data.get("error", data)))
             choice = data["choices"][0]
             payload.data = {
@@ -303,11 +305,18 @@ def native_reasoner_kwargs(
 def create_reasoner_scheduler(
     model_path: str,
     *,
-    gpu_id: int = 0,
+    device: str | None = None,
+    gpu_id: int | None = None,
     max_concurrency: int = 8,
     runtime_gpu_ids: list[int] | None = None,
     server_args_overrides: dict[str, Any] | None = None,
 ) -> NativeReasonerScheduler:
+    from sglang_omni.utils.device import resolve_concrete_device
+
+    concrete_device = resolve_concrete_device(device, gpu_id)
+    if concrete_device.index is None:
+        raise ValueError("Native Cosmos3 execution requires an indexed accelerator")
+    gpu_id = concrete_device.index
     if multiprocessing.current_process().daemon:
         raise RuntimeError("Native SRT requires allow_child_processes=true")
     from sglang import Engine
