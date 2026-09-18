@@ -4,14 +4,17 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import multiprocessing
 import threading
 from concurrent.futures import CancelledError, Future
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from sglang_omni.admission import InvalidRequestError
+from sglang_omni.models.cosmos3.stages import resolve_native_checkpoint
 from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.messages import OutgoingMessage
 from sglang_omni.scheduling.threaded_simple_scheduler import ThreadedSimpleScheduler
@@ -323,9 +326,20 @@ def create_reasoner_scheduler(
     from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
     from sglang.srt.entrypoints.openai.serving_chat import OpenAIServingChat
 
-    kwargs = native_reasoner_kwargs(
-        model_path, gpu_id, server_args_overrides, runtime_gpu_ids
+    kwargs = resolve_native_checkpoint(
+        native_reasoner_kwargs(
+            model_path, gpu_id, server_args_overrides, runtime_gpu_ids
+        )
     )
+    root_config = json.loads((Path(kwargs["model_path"]) / "config.json").read_text())
+    if (
+        "Cosmos3EdgeForConditionalGeneration" in root_config["architectures"]
+        and importlib.util.find_spec("sglang.srt.models.cosmos3_edge") is None
+    ):
+        raise RuntimeError(
+            "Native SRT cannot serve the Cosmos3 Edge Reasoner; install a SGLang "
+            "revision that provides sglang.srt.models.cosmos3_edge"
+        )
     engine = Engine(**kwargs)
     try:
         service = OpenAIServingChat(engine.tokenizer_manager, engine.template_manager)

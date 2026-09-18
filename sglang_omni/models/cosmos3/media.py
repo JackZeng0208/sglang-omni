@@ -41,7 +41,10 @@ def prepare_native_media_app(
         set_global_server_args,
     )
 
-    from sglang_omni.models.cosmos3.stages import native_server_kwargs
+    from sglang_omni.models.cosmos3.stages import (
+        native_server_kwargs,
+        resolve_native_checkpoint,
+    )
 
     if (
         "worker_failure"
@@ -64,8 +67,10 @@ def prepare_native_media_app(
     output_dir = str(Path(getattr(stage.factory, "output_dir", "outputs")).resolve())
     kwargs.update(host=host, port=port, strict_ports=True, output_path=output_dir)
     native_args = ServerArgs.from_kwargs(
-        **native_server_kwargs(
-            config.model_path, stage.gpu, kwargs, stage.runtime_gpu_ids
+        **resolve_native_checkpoint(
+            native_server_kwargs(
+                config.model_path, stage.gpu, kwargs, stage.runtime_gpu_ids
+            )
         )
     )
     # Explicit ports make startup fail if another process takes them.
