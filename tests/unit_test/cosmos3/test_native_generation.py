@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import json
 import queue
 import threading
 from types import SimpleNamespace
@@ -232,3 +233,28 @@ def test_abort_between_native_completion_and_omni_emission_releases_media(tmp_pa
     assert scheduler.outbox.empty()
     assert not list(tmp_path.iterdir())
     assert not scheduler._native_requests
+
+
+def test_edge_policy_request_reaches_native_action_generation(tmp_path, monkeypatch):
+    from sglang.multimodal_gen.runtime.entrypoints.action import protocol
+
+    monkeypatch.setattr(
+        protocol, "action_generation_response", lambda output, args: {"data": output}
+    )
+    generator = Generator(None)
+    generator.server_args = SimpleNamespace()
+    generator.generate_action = lambda **kwargs: generator.calls.append(kwargs) or [1.0]
+    fields = {"action_mode": " Policy ", "num_frames": 17, "guidance_scale": 1.0}
+    scheduler = NativeGenerationScheduler(generator, str(tmp_path), is_edge=True)
+    result = scheduler._generate(payload(fields))
+    sent = generator.calls[0]["sampling_params_kwargs"]
+    assert (sent["action_mode"], sent["prompt"]) == ("policy", "")
+    assert (sent["num_frames"], sent["guidance_scale"]) == (17, 1.0)
+    assert "cancellation_event" not in generator.calls[0]
+    media = result.data["media"][0]
+    assert media["modality"] == "action"
+    assert json.loads(open(media["path"]).read()) == {"data": [1.0]}
+    with pytest.raises(ValueError, match="nonempty prompt"):
+        NativeGenerationScheduler(Generator(None), str(tmp_path))._generate(
+            payload(fields)
+        )

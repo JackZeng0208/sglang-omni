@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import sys
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -37,6 +38,11 @@ class NativeRequest(SimpleNamespace):
         "return_meta_info",
         "return_token_ids",
     }
+
+
+def checkpoint(root, architecture):
+    (root / "config.json").write_text(json.dumps({"architectures": [architecture]}))
+    return str(root)
 
 
 def payload(request_id="r1", inputs="Describe the scene", **params):
@@ -380,7 +386,9 @@ def test_stage_sampling_is_preserved_and_stage_params_take_precedence():
 
 
 @pytest.mark.parametrize("devices", [None, [3, 5]])
-def test_reasoner_factory_passes_resolved_device_to_native(monkeypatch, devices):
+def test_reasoner_factory_passes_resolved_device_to_native(
+    monkeypatch, tmp_path, devices
+):
     import sglang
 
     from sglang_omni.utils import device as device_utils
@@ -401,7 +409,10 @@ def test_reasoner_factory_passes_resolved_device_to_native(monkeypatch, devices)
     monkeypatch.setattr(sglang, "Engine", startup)
     with pytest.raises(RuntimeError, match="native startup reached"):
         create_reasoner_scheduler(
-            "checkpoint", device=None, gpu_id=None, runtime_gpu_ids=devices
+            checkpoint(tmp_path, "Cosmos3ForConditionalGeneration"),
+            device=None,
+            gpu_id=None,
+            runtime_gpu_ids=devices,
         )
 
 
@@ -415,3 +426,24 @@ def test_reasoner_factory_rejects_cpu_before_native_startup(monkeypatch):
     )
     with pytest.raises(ValueError, match="indexed accelerator"):
         create_reasoner_scheduler("checkpoint", device="cpu")
+
+
+def test_edge_reasoner_refuses_native_srt_without_the_edge_model(tmp_path, monkeypatch):
+    import sglang
+
+    from sglang_omni.utils import device as device_utils
+
+    def startup(**kwargs):
+        pytest.fail("Native startup must not begin without the Edge model")
+
+    monkeypatch.setattr(
+        device_utils,
+        "resolve_concrete_device",
+        lambda device, index: SimpleNamespace(index=0),
+    )
+    monkeypatch.setitem(sys.modules, "sglang.srt.models.cosmos3_edge", None)
+    monkeypatch.setattr(sglang, "Engine", startup)
+    with pytest.raises(RuntimeError, match="Cosmos3 Edge Reasoner"):
+        create_reasoner_scheduler(
+            checkpoint(tmp_path, "Cosmos3EdgeForConditionalGeneration")
+        )

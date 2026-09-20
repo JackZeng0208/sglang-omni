@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 from types import SimpleNamespace
 
+import huggingface_hub
 import pytest
 
 from sglang_omni.config import StageConfig
 from sglang_omni.config.placement import build_stage_placement_plan
 from sglang_omni.models.cosmos3.config import Cosmos3PipelineConfig
 from sglang_omni.models.cosmos3.reasoner import native_reasoner_kwargs
-from sglang_omni.models.cosmos3.stages import native_server_kwargs
+from sglang_omni.models.cosmos3.stages import (
+    native_server_kwargs,
+    resolve_native_checkpoint,
+)
 from sglang_omni.pipeline import runtime_config
 from sglang_omni.pipeline.mp_runner import _build_stage_groups
 from sglang_omni.pipeline.replicas import validate_device_assignment
@@ -123,7 +127,7 @@ def test_generation_factory_passes_resolved_device_to_native(
     monkeypatch.setattr(ServerArgs, "from_kwargs", startup)
     with pytest.raises(RuntimeError, match="native startup reached"):
         create_generation_scheduler(
-            "checkpoint",
+            str(tmp_path),
             device=None,
             gpu_id=None,
             runtime_gpu_ids=devices,
@@ -142,3 +146,30 @@ def test_generation_factory_rejects_cpu_before_native_startup(monkeypatch):
     )
     with pytest.raises(ValueError, match="indexed accelerator"):
         create_generation_scheduler("checkpoint", device="cpu")
+
+
+@pytest.mark.parametrize(
+    ("model_path", "overrides"),
+    [("org/model@abc123", {}), ("org/model", {"revision": "abc123"})],
+)
+def test_native_checkpoint_honors_both_pinning_forms(
+    monkeypatch, model_path, overrides
+):
+    captured = {}
+
+    def snapshot_download(repo_id, revision=None):
+        captured.update(repo_id=repo_id, revision=revision)
+        return "/snapshots/abc123"
+
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", snapshot_download)
+    kwargs = resolve_native_checkpoint({"model_path": model_path, **overrides})
+    assert captured == {"repo_id": "org/model", "revision": "abc123"}
+    assert kwargs["model_path"] == "/snapshots/abc123"
+    assert kwargs["served_model_name"] == "org/model"
+
+
+def test_conflicting_revision_pins_are_rejected():
+    with pytest.raises(ValueError, match="different checkpoint revisions"):
+        resolve_native_checkpoint(
+            {"model_path": "org/model@abc123", "revision": "def456"}
+        )
