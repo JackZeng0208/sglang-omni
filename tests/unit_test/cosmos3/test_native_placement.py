@@ -13,9 +13,8 @@ from sglang_omni.models.cosmos3.stages import (
     resolve_native_checkpoint,
 )
 from sglang_omni.pipeline import runtime_config
-from sglang_omni.pipeline.mp_runner import _build_stage_groups
+from sglang_omni.pipeline.mp_runner import build_stage_groups
 from sglang_omni.pipeline.replicas import validate_device_assignment
-from sglang_omni.pipeline.stage_workers import _stage_gpu_ids
 
 
 def config(devices=(1, 3)):
@@ -26,11 +25,11 @@ def config(devices=(1, 3)):
 
 
 def test_native_workers_reserve_all_gpus_but_use_one_omni_process(monkeypatch):
-    monkeypatch.setattr(runtime_config, "_visible_device_count", lambda: 4)
+    monkeypatch.setattr(runtime_config, "visible_device_count", lambda: 4)
     cfg = config()
     prep = runtime_config.prepare_pipeline_runtime(cfg)
     try:
-        groups = _build_stage_groups(
+        groups = build_stage_groups(
             cfg,
             stages_cfg=prep.stages_cfg,
             endpoints=prep.endpoints,
@@ -43,7 +42,6 @@ def test_native_workers_reserve_all_gpus_but_use_one_omni_process(monkeypatch):
         spec = groups[0].specs[0]
         assert spec.tp_size == 1
         assert spec.factory_kwargs["runtime_gpu_ids"] == [1, 3]
-        assert _stage_gpu_ids(groups[0].specs) == [1, 3]
     finally:
         prep.runtime_dir.close()
 
@@ -88,7 +86,7 @@ def test_invalid_native_gpu_lists_are_rejected(devices):
 
 
 def test_native_runtime_cannot_share_a_process_with_another_stage(monkeypatch):
-    monkeypatch.setattr(runtime_config, "_visible_device_count", lambda: 4)
+    monkeypatch.setattr(runtime_config, "visible_device_count", lambda: 4)
     cfg = config()
     cfg.stages.append(
         StageConfig(
@@ -106,6 +104,9 @@ def test_native_runtime_cannot_share_a_process_with_another_stage(monkeypatch):
 def test_generation_factory_passes_resolved_device_to_native(
     monkeypatch, tmp_path, devices
 ):
+    from sglang.multimodal_gen.runtime.entrypoints.diffusion_generator import (
+        DiffGenerator,
+    )
     from sglang.multimodal_gen.runtime.server_args import ServerArgs
 
     from sglang_omni.models.cosmos3.stages import create_generation_scheduler
@@ -116,6 +117,7 @@ def test_generation_factory_passes_resolved_device_to_native(
         "resolve_concrete_device",
         lambda device, index: SimpleNamespace(index=3),
     )
+    monkeypatch.setattr(DiffGenerator, "supports_cancellation", True, raising=False)
 
     def startup(**kwargs):
         if devices is None:
@@ -127,7 +129,7 @@ def test_generation_factory_passes_resolved_device_to_native(
     monkeypatch.setattr(ServerArgs, "from_kwargs", startup)
     with pytest.raises(RuntimeError, match="native startup reached"):
         create_generation_scheduler(
-            str(tmp_path),
+            "checkpoint",
             device=None,
             gpu_id=None,
             runtime_gpu_ids=devices,
@@ -148,6 +150,69 @@ def test_generation_factory_rejects_cpu_before_native_startup(monkeypatch):
         create_generation_scheduler("checkpoint", device="cpu")
 
 
+@pytest.mark.parametrize("supported", [False, True])
+def test_generation_factory_requires_native_cancellation(
+    monkeypatch, tmp_path, supported
+):
+    from sglang.multimodal_gen.runtime.entrypoints.diffusion_generator import (
+        DiffGenerator,
+    )
+    from sglang.multimodal_gen.runtime.server_args import ServerArgs
+
+    from sglang_omni.models.cosmos3.stages import create_generation_scheduler
+    from sglang_omni.utils import device as device_utils
+
+    monkeypatch.setattr(
+        device_utils,
+        "resolve_concrete_device",
+        lambda device, index: SimpleNamespace(index=0),
+    )
+    if supported:
+        monkeypatch.setattr(DiffGenerator, "supports_cancellation", True, raising=False)
+    else:
+        monkeypatch.delattr(DiffGenerator, "supports_cancellation", raising=False)
+
+    def startup(**kwargs):
+        raise RuntimeError("native startup reached")
+
+    monkeypatch.setattr(ServerArgs, "from_kwargs", startup)
+    expected = "native startup reached" if supported else "supports_cancellation"
+    with pytest.raises(RuntimeError, match=expected):
+        create_generation_scheduler("checkpoint", output_dir=str(tmp_path))
+
+
+@pytest.mark.parametrize("instance_supported", [False, True])
+def test_generation_factory_warns_when_the_config_cannot_cancel(
+    monkeypatch, tmp_path, caplog, instance_supported
+):
+    import logging
+
+    from sglang.multimodal_gen.runtime.entrypoints.diffusion_generator import (
+        DiffGenerator,
+    )
+    from sglang.multimodal_gen.runtime.server_args import ServerArgs
+
+    from sglang_omni.models.cosmos3.stages import create_generation_scheduler
+    from sglang_omni.utils import device as device_utils
+
+    monkeypatch.setattr(
+        device_utils,
+        "resolve_concrete_device",
+        lambda device, index: SimpleNamespace(index=0),
+    )
+    monkeypatch.setattr(DiffGenerator, "supports_cancellation", True, raising=False)
+    generator = SimpleNamespace(
+        shutdown=lambda: None,
+        local_scheduler_process=[],
+        supports_cancellation=instance_supported,
+    )
+    monkeypatch.setattr(ServerArgs, "from_kwargs", lambda **kwargs: kwargs)
+    monkeypatch.setattr(DiffGenerator, "from_server_args", lambda args: generator)
+    with caplog.at_level(logging.WARNING, logger="sglang_omni.models.cosmos3.stages"):
+        create_generation_scheduler("checkpoint", output_dir=str(tmp_path))
+    assert ("cancellation is unavailable" in caplog.text) is not instance_supported
+
+
 @pytest.mark.parametrize(
     ("model_path", "overrides"),
     [("org/model@abc123", {}), ("org/model", {"revision": "abc123"})],
@@ -166,6 +231,12 @@ def test_native_checkpoint_honors_both_pinning_forms(
     assert captured == {"repo_id": "org/model", "revision": "abc123"}
     assert kwargs["model_path"] == "/snapshots/abc123"
     assert kwargs["served_model_name"] == "org/model"
+
+
+def test_unpinned_checkpoint_is_left_to_native(monkeypatch):
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", None)
+    kwargs = {"model_path": "org/model"}
+    assert resolve_native_checkpoint(kwargs) is kwargs
 
 
 def test_conflicting_revision_pins_are_rejected():

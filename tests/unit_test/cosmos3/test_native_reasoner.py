@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
-import sys
 import threading
+import time
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -21,7 +21,7 @@ from sglang_omni.models.cosmos3.reasoner import (
     native_reasoner_kwargs,
 )
 from sglang_omni.proto import OmniRequest, StagePayload, StreamMessage
-from sglang_omni.scheduling.messages import IncomingMessage
+from sglang_omni.scheduling.message import IncomingMessage
 
 
 class NativeRequest(SimpleNamespace):
@@ -38,11 +38,6 @@ class NativeRequest(SimpleNamespace):
         "return_meta_info",
         "return_token_ids",
     }
-
-
-def checkpoint(root, architecture):
-    (root / "config.json").write_text(json.dumps({"architectures": [architecture]}))
-    return str(root)
 
 
 def payload(request_id="r1", inputs="Describe the scene", **params):
@@ -76,6 +71,7 @@ class Chat:
         self.peak = 0
         self.closed_streams = 0
         self.background_count = 0
+        self.release = None
 
     async def handle_request(self, request, raw_request):
         assert asyncio.get_running_loop() is self.engine.loop
@@ -89,7 +85,12 @@ class Chat:
         self.active += 1
         self.peak = max(self.peak, self.active)
         try:
-            await asyncio.sleep(0.02)
+            if content == "wait for release":
+                if self.release is None:
+                    self.release = asyncio.Event()
+                await self.release.wait()
+            else:
+                await asyncio.sleep(0.02)
         finally:
             self.active -= 1
         if getattr(request, "stream", False):
@@ -104,6 +105,8 @@ class Chat:
                                 ]
                             }
                         ) + "\n\n"
+                        if content == "fail after first delta":
+                            yield 'data: {"error": {"message": "native failure"}}\n\n'
                     yield 'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\n'
                     yield 'data: {"choices": [], "usage": {"completion_tokens": 4}}\n\n'
                     yield "data: [DONE]\n\n"
@@ -111,7 +114,11 @@ class Chat:
                     self.closed_streams += 1
 
             async def background():
+                # The native disconnect abort sleeps before it inspects the
+                # request. Awaiting it on the completion path adds that
+                # sleep to every streamed completion.
                 self.background_count += 1
+                await asyncio.sleep(2)
 
             return SimpleNamespace(body_iterator=frames(), background=background)
         return {
@@ -133,7 +140,7 @@ class Chat:
 def running(*, request_type=NativeRequest):
     engine = Engine()
     chat = Chat(engine)
-    scheduler = NativeReasonerScheduler(engine, chat, request_type, max_concurrency=4)
+    scheduler = NativeReasonerScheduler(engine, chat, request_type)
     thread = threading.Thread(target=scheduler.start)
     thread.start()
     try:
@@ -143,9 +150,30 @@ def running(*, request_type=NativeRequest):
         scheduler.stop()
         thread.join(timeout=3)
         assert not thread.is_alive()
-        assert not scheduler._loop_thread.is_alive()
+        assert not scheduler.loop_thread.is_alive()
         assert engine.loop.is_closed()
         assert engine.shutdown_count == 1
+
+
+def test_native_loop_thread_selects_the_serving_device(monkeypatch):
+    from sglang_omni.platforms import current_platform
+
+    selected: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        current_platform,
+        "set_device",
+        lambda device: selected.append((threading.current_thread().name, device)),
+    )
+    engine = Engine()
+    scheduler = NativeReasonerScheduler(engine, Chat(engine), NativeRequest, device=5)
+    thread = threading.Thread(target=scheduler.start)
+    thread.start()
+    try:
+        assert selected == [("cosmos3-native-tokenizer", 5)]
+    finally:
+        scheduler.stop()
+        thread.join(timeout=3)
+    assert not thread.is_alive()
 
 
 def enqueue(scheduler, item):
@@ -263,24 +291,24 @@ def test_native_scheduler_receives_concurrent_requests_on_one_loop():
         assert {m.request_id for m in messages} == {"r1", "r2", "r3"}
         assert all(m.type == "result" for m in messages)
         assert chat.peak > 1
-        chunk = Client._default_result_builder("r1", messages[0].data.data)
+        chunk = Client.default_result_builder("r1", messages[0].data.data)
         assert chunk.text == "你好"
         assert chunk.output_token_logprobs == [[-0.1, 1, "你"], [-0.2, 2, "好"]]
         assert chunk.usage.completion_tokens == 2
 
 
 def test_stream_preserves_unicode_without_duplicate_terminal_text():
-    with running() as (scheduler, _, chat):
+    with running() as (scheduler, engine, chat):
         enqueue(scheduler, payload(stream=True))
         chunks = []
         while True:
             msg = scheduler.outbox.get(timeout=3)
             if msg.type == "result":
-                chunks.append(Client._default_result_builder("r1", msg.data.data))
+                chunks.append(Client.default_result_builder("r1", msg.data.data))
                 break
             assert msg.type == "stream"
             chunks.append(
-                Client._default_stream_builder(
+                Client.default_stream_builder(
                     "r1",
                     StreamMessage(
                         request_id="r1",
@@ -290,6 +318,7 @@ def test_stream_preserves_unicode_without_duplicate_terminal_text():
                 )
             )
 
+        assert engine.aborts == []
         assert sum(chunk.finish_reason is not None for chunk in chunks) == 1
         assert chunks[-1].finish_reason == "stop"
         assert all(chunk.text for chunk in chunks[:-1])
@@ -311,7 +340,24 @@ def test_stream_preserves_unicode_without_duplicate_terminal_text():
         parts = asyncio.run(consume())
         assert "".join(part.text or "" for part in parts) == "你好 👩🏽‍🚀 e\u0301"
         assert parts[-1].usage.completion_tokens == 4
-        assert chat.closed_streams == chat.background_count == 1
+        assert chat.closed_streams == 1
+        assert chat.background_count == 0
+
+
+def test_interrupted_stream_aborts_the_native_request_at_once():
+    with running() as (scheduler, engine, chat):
+        enqueue(scheduler, payload(inputs="fail after first delta", stream=True))
+        messages = []
+        while True:
+            msg = scheduler.outbox.get(timeout=3)
+            messages.append(msg)
+            if msg.type != "stream":
+                break
+        assert messages[-1].type == "error"
+        assert "native failure" in str(messages[-1].data)
+        assert chat.closed_streams == 1
+        assert chat.background_count == 0
+        assert engine.aborts == [("r1", False)]
 
 
 def test_abort_reaches_native_loop_and_suppresses_terminal_result():
@@ -324,25 +370,42 @@ def test_abort_reaches_native_loop_and_suppresses_terminal_result():
         assert ("r1", False) in engine.aborts
 
 
-def test_abort_during_executor_dispatch_does_not_start_native_request():
-    with running() as (scheduler, _, chat):
+def test_abort_before_native_loop_runs_does_not_start_native_request():
+    with running() as (scheduler, engine, chat):
         entered = threading.Event()
         release = threading.Event()
-        original = scheduler._fn
 
-        def delayed(item):
+        def hold_loop():
             entered.set()
             assert release.wait(2)
-            return original(item)
 
-        scheduler._fn = delayed
-        enqueue(scheduler, payload())
+        engine.loop.call_soon_threadsafe(hold_loop)
         assert entered.wait(2)
+        enqueue(scheduler, payload())
+        deadline = time.monotonic() + 2
+        while "r1" not in scheduler.pending and time.monotonic() < deadline:
+            time.sleep(0.005)
         scheduler.abort("r1")
         release.set()
         with pytest.raises(queue.Empty):
             scheduler.outbox.get(timeout=0.15)
         assert not chat.calls
+
+
+def test_admission_is_not_capped_by_the_adapter():
+    with running() as (scheduler, engine, chat):
+        count = 12
+        for index in range(count):
+            enqueue(scheduler, payload(f"r{index}", inputs="wait for release"))
+        deadline = time.monotonic() + 3
+        while chat.active < count and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert chat.active == count
+        assert chat.peak == count
+        engine.loop.call_soon_threadsafe(chat.release.set)
+        messages = [scheduler.outbox.get(timeout=3) for _ in range(count)]
+        assert {m.request_id for m in messages} == {f"r{i}" for i in range(count)}
+        assert all(m.type == "result" for m in messages)
 
 
 def test_queued_abort_never_dispatches():
@@ -360,7 +423,7 @@ def test_shutdown_cancels_active_native_work_and_joins_threads():
         assert chat.started.wait(2)
         scheduler.stop()
         assert ("", True) in engine.aborts
-        assert not scheduler._loop_thread.is_alive()
+        assert not scheduler.loop_thread.is_alive()
 
 
 def test_reasoner_variant_uses_native_child_process_ownership():
@@ -386,11 +449,10 @@ def test_stage_sampling_is_preserved_and_stage_params_take_precedence():
 
 
 @pytest.mark.parametrize("devices", [None, [3, 5]])
-def test_reasoner_factory_passes_resolved_device_to_native(
-    monkeypatch, tmp_path, devices
-):
+def test_reasoner_factory_passes_resolved_device_to_native(monkeypatch, devices):
     import sglang
 
+    from sglang_omni.platforms import current_platform
     from sglang_omni.utils import device as device_utils
 
     monkeypatch.setattr(
@@ -398,6 +460,7 @@ def test_reasoner_factory_passes_resolved_device_to_native(
         "resolve_concrete_device",
         lambda device, index: SimpleNamespace(index=3),
     )
+    monkeypatch.setattr(current_platform, "set_device", lambda device: None)
 
     def startup(**kwargs):
         assert kwargs["base_gpu_id"] == 3
@@ -409,11 +472,32 @@ def test_reasoner_factory_passes_resolved_device_to_native(
     monkeypatch.setattr(sglang, "Engine", startup)
     with pytest.raises(RuntimeError, match="native startup reached"):
         create_reasoner_scheduler(
-            checkpoint(tmp_path, "Cosmos3ForConditionalGeneration"),
-            device=None,
-            gpu_id=None,
-            runtime_gpu_ids=devices,
+            "checkpoint", device=None, gpu_id=None, runtime_gpu_ids=devices
         )
+
+
+def test_reasoner_factory_pins_the_host_to_the_serving_device(monkeypatch):
+    import sglang
+
+    from sglang_omni.platforms import current_platform
+    from sglang_omni.utils import device as device_utils
+
+    monkeypatch.setattr(
+        device_utils,
+        "resolve_concrete_device",
+        lambda device, index: SimpleNamespace(index=6),
+    )
+    pinned: list[int] = []
+    monkeypatch.setattr(current_platform, "set_device", pinned.append)
+
+    def startup(**kwargs):
+        assert pinned == [6]
+        raise RuntimeError("native startup reached")
+
+    monkeypatch.setattr(sglang, "Engine", startup)
+    with pytest.raises(RuntimeError, match="native startup reached"):
+        create_reasoner_scheduler("checkpoint", gpu_id=6)
+    assert pinned == [6]
 
 
 def test_reasoner_factory_rejects_cpu_before_native_startup(monkeypatch):
@@ -426,24 +510,3 @@ def test_reasoner_factory_rejects_cpu_before_native_startup(monkeypatch):
     )
     with pytest.raises(ValueError, match="indexed accelerator"):
         create_reasoner_scheduler("checkpoint", device="cpu")
-
-
-def test_edge_reasoner_refuses_native_srt_without_the_edge_model(tmp_path, monkeypatch):
-    import sglang
-
-    from sglang_omni.utils import device as device_utils
-
-    def startup(**kwargs):
-        pytest.fail("Native startup must not begin without the Edge model")
-
-    monkeypatch.setattr(
-        device_utils,
-        "resolve_concrete_device",
-        lambda device, index: SimpleNamespace(index=0),
-    )
-    monkeypatch.setitem(sys.modules, "sglang.srt.models.cosmos3_edge", None)
-    monkeypatch.setattr(sglang, "Engine", startup)
-    with pytest.raises(RuntimeError, match="Cosmos3 Edge Reasoner"):
-        create_reasoner_scheduler(
-            checkpoint(tmp_path, "Cosmos3EdgeForConditionalGeneration")
-        )

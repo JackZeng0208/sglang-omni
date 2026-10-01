@@ -15,7 +15,7 @@ from sglang_omni.models.cosmos3.stages import (
     build_sampling_params,
 )
 from sglang_omni.proto import OmniRequest, StagePayload
-from sglang_omni.scheduling.messages import IncomingMessage
+from sglang_omni.scheduling.message import IncomingMessage
 
 
 def payload(inputs="A quiet lake", **params):
@@ -78,7 +78,7 @@ def test_invalid_request_is_rejected_before_native_dispatch(invalid_payload, tmp
     generator = Generator(None)
     scheduler = NativeGenerationScheduler(generator, str(tmp_path))
     with pytest.raises(ValueError):
-        scheduler._generate(invalid_payload)
+        scheduler.generate(invalid_payload)
     assert not generator.calls
 
 
@@ -99,7 +99,7 @@ def test_saved_result_survives_scheduler_and_client_boundary(tmp_path):
     try:
         message = scheduler.outbox.get(timeout=3)
         assert message.type == "result"
-        chunk = Client._default_result_builder("request-1", message.data.data)
+        chunk = Client.default_result_builder("request-1", message.data.data)
         assert chunk.media[0]["path"] == result.output_file_path
         assert chunk.media[0]["metrics"] == {"denoise": 1.8}
         assert len(generator.calls) == 1
@@ -115,7 +115,7 @@ def test_saved_result_survives_scheduler_and_client_boundary(tmp_path):
 def test_native_failure_cannot_become_empty_success(result, tmp_path):
     scheduler = NativeGenerationScheduler(Generator(result), str(tmp_path))
     with pytest.raises(RuntimeError):
-        scheduler._generate(payload())
+        scheduler.generate(payload())
 
 
 def test_dead_native_worker_fails_the_owning_stage(tmp_path):
@@ -125,7 +125,7 @@ def test_dead_native_worker_fails_the_owning_stage(tmp_path):
     ]
     scheduler = NativeGenerationScheduler(generator, str(tmp_path))
     with pytest.raises(RuntimeError, match="1234 exited with code 2"):
-        scheduler._next_message()
+        scheduler.next_message()
 
 
 def test_queued_abort_does_not_dispatch_native_work(tmp_path):
@@ -206,7 +206,7 @@ def test_active_cancel_settles_native_work_and_removes_only_owned_files(tmp_path
     assert not thread.is_alive()
     assert list(tmp_path.iterdir()) == [keep]
     assert keep.read_text() == "keep"
-    assert not scheduler._native_requests
+    assert not scheduler.native_requests
 
 
 def test_abort_between_native_completion_and_omni_emission_releases_media(tmp_path):
@@ -226,13 +226,13 @@ def test_abort_between_native_completion_and_omni_emission_releases_media(tmp_pa
             )
 
     scheduler = NativeGenerationScheduler(SavedGenerator(None), str(tmp_path))
-    result = scheduler._generate(payload())
+    result = scheduler.generate(payload())
     assert list(tmp_path.iterdir())
     scheduler.abort("request-1")
-    scheduler._emit_result("request-1", result, scheduler.outbox)
+    scheduler.emit_result("request-1", result, scheduler.outbox)
     assert scheduler.outbox.empty()
     assert not list(tmp_path.iterdir())
-    assert not scheduler._native_requests
+    assert not scheduler.native_requests
 
 
 def test_edge_policy_request_reaches_native_action_generation(tmp_path, monkeypatch):
@@ -246,7 +246,7 @@ def test_edge_policy_request_reaches_native_action_generation(tmp_path, monkeypa
     generator.generate_action = lambda **kwargs: generator.calls.append(kwargs) or [1.0]
     fields = {"action_mode": " Policy ", "num_frames": 17, "guidance_scale": 1.0}
     scheduler = NativeGenerationScheduler(generator, str(tmp_path), is_edge=True)
-    result = scheduler._generate(payload(fields))
+    result = scheduler.generate(payload(fields))
     sent = generator.calls[0]["sampling_params_kwargs"]
     assert (sent["action_mode"], sent["prompt"]) == ("policy", "")
     assert (sent["num_frames"], sent["guidance_scale"]) == (17, 1.0)
@@ -255,6 +255,6 @@ def test_edge_policy_request_reaches_native_action_generation(tmp_path, monkeypa
     assert media["modality"] == "action"
     assert json.loads(open(media["path"]).read()) == {"data": [1.0]}
     with pytest.raises(ValueError, match="nonempty prompt"):
-        NativeGenerationScheduler(Generator(None), str(tmp_path))._generate(
+        NativeGenerationScheduler(Generator(None), str(tmp_path)).generate(
             payload(fields)
         )
