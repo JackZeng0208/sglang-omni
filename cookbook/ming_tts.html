@@ -42,7 +42,7 @@
   <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
 <link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
 
-    <script src="../_static/documentation_options.js?v=23027dbc"></script>
+    <script src="../_static/documentation_options.js?v=7ed07c24"></script>
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
@@ -60,8 +60,8 @@
     <link rel="prev" title="Qwen3 TTS" href="qwen3_tts.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-  <meta name="docsearch:version" content="0.1.4" />
-    <meta name="docbuild:last-update" content="Sep 10, 2026"/>
+  <meta name="docsearch:version" content="0.1.8" />
+    <meta name="docbuild:last-update" content="Oct 15, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -207,15 +207,18 @@
         <p aria-level="2" class="caption" role="heading"><span class="caption-text">Get Started</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../get_started/installation.html">🚀 Installation</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../get_started/installation_npu.html">Installation — Ascend NPU</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../get_started/installation_npu.html">🚀 Installation — Ascend NPU</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../get_started/installation_xpu.html">🚀 Installation — Intel XPU</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../get_started/installation_cpu.html">🚀 Installation — Intel CPU</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../get_started/installation_musa.html">🚀 Installation — MUSA</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Cookbook</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="higgs_tts.html">Higgs TTS</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nemotron_diarization.html">Nemotron 3 Diarization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="voxtral_tts.html">Voxtral TTS</a></li>
 <li class="toctree-l1"><a class="reference internal" href="fishaudio_s2_pro.html">Fish Audio S2-Pro</a></li>
+<li class="toctree-l1"><a class="reference internal" href="fishaudio_drama3.html">Fish Audio Drama 3</a></li>
 <li class="toctree-l1"><a class="reference internal" href="qwen3_tts.html">Qwen3 TTS</a></li>
 <li class="toctree-l1 current active"><a class="current reference internal" href="#">Ming-Omni-TTS</a></li>
 <li class="toctree-l1"><a class="reference internal" href="moss_tts.html">MOSS-TTS</a></li>
@@ -226,10 +229,14 @@
 <li class="toctree-l1"><a class="reference internal" href="qwen3_asr.html">Qwen3-ASR</a></li>
 <li class="toctree-l1"><a class="reference internal" href="fun_asr.html">Fun-ASR-Nano</a></li>
 <li class="toctree-l1"><a class="reference internal" href="arkasr.html">ARK-ASR-3B</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nemotron3_5_asr.html">Nemotron 3.5 ASR</a></li>
 <li class="toctree-l1"><a class="reference internal" href="moss_transcribe_diarize.html">MOSS-Transcribe-Diarize</a></li>
 <li class="toctree-l1"><a class="reference internal" href="whisper_asr.html">Whisper ASR</a></li>
 <li class="toctree-l1"><a class="reference internal" href="qwen3_omni.html">Qwen3-Omni</a></li>
+<li class="toctree-l1"><a class="reference internal" href="minicpm_o.html">MiniCPM-o</a></li>
 <li class="toctree-l1"><a class="reference internal" href="ming_omni.html">Ming-Omni</a></li>
+<li class="toctree-l1"><a class="reference internal" href="nemotron_voicechat.html">NemotronLabs VoiceChat</a></li>
+<li class="toctree-l1"><a class="reference internal" href="personaplex.html">PersonaPlex</a></li>
 <li class="toctree-l1"><a class="reference internal" href="llada2_uni.html">LLaDA2.0-Uni</a></li>
 <li class="toctree-l1"><a class="reference internal" href="fun_cosyvoice3.html">Fun-CosyVoice3</a></li>
 <li class="toctree-l1"><a class="reference internal" href="auk.html">AuK</a></li>
@@ -248,6 +255,7 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Benchmarks</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../benchmarks/relay.html">Benchmark Relay</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../benchmarks/qwen3_tts_leading_silence.html">Qwen3-TTS Base: Leading Silence in X-Vector Voice Cloning</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Developer Reference</span></p>
 <ul class="nav bd-sidenav">
@@ -260,7 +268,14 @@
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/reference_encode_service.html">Reference Encode Service</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/profiler.html">Request-level profiler</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/qwen3_asr_concurrency_profile.html">Qwen3-ASR High-Concurrency Benchmark and Bottleneck Profile</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/full_duplex_bench.html">Full-Duplex-Bench runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/full_duplex_metrics.html">Full-Duplex-Bench v1.0 unified metrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/tts_bench.html">TTS benchmark runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/asr_bench.html">ASR benchmark runbook</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/omni_offline_bench.html">MiniCPM-o offline benchmark runbook</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/rl_admin_control.html">RL Admin Control</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/mlx.html">MLX Path</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../developer_reference/ci_labels.html">CI Workflows and Labels</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../developer_reference/bump_version.html">Bumping the SGLang Pin</a></li>
 </ul>
 
@@ -786,7 +801,7 @@ flags used for generation:</p>
 <th class="head"><p>Lang</p></th>
 <th class="head text-right"><p>Samples</p></th>
 <th class="head text-right"><p>Failed</p></th>
-<th class="head text-right"><p>Corpus WER</p></th>
+<th class="head text-right"><p>Corpus WER/CER</p></th>
 <th class="head text-right"><p>RTF Mean</p></th>
 <th class="head text-right"><p>Latency Mean (s)</p></th>
 <th class="head text-right"><p>First Audio Mean (s)</p></th>
@@ -800,44 +815,44 @@ flags used for generation:</p>
 <td class="text-right"><p>1088</p></td>
 <td class="text-right"><p>0</p></td>
 <td class="text-right"><p>0.95%</p></td>
-<td class="text-right"><p>0.2323</p></td>
-<td class="text-right"><p>1.090</p></td>
-<td class="text-right"><p>0.4601</p></td>
-<td class="text-right"><p>7.325</p></td>
-<td class="text-right"><p>34.423</p></td>
+<td class="text-right"><p>0.1620</p></td>
+<td class="text-right"><p>0.764</p></td>
+<td class="text-right"><p>0.3380</p></td>
+<td class="text-right"><p>10.456</p></td>
+<td class="text-right"><p>49.428</p></td>
 </tr>
 <tr class="row-odd"><td><p>text-only</p></td>
 <td><p>ZH</p></td>
 <td class="text-right"><p>2020</p></td>
 <td class="text-right"><p>0</p></td>
-<td class="text-right"><p>0.68%</p></td>
-<td class="text-right"><p>0.2305</p></td>
-<td class="text-right"><p>1.154</p></td>
-<td class="text-right"><p>0.4649</p></td>
-<td class="text-right"><p>6.925</p></td>
-<td class="text-right"><p>34.715</p></td>
+<td class="text-right"><p>0.64%</p></td>
+<td class="text-right"><p>0.1577</p></td>
+<td class="text-right"><p>0.789</p></td>
+<td class="text-right"><p>0.3283</p></td>
+<td class="text-right"><p>10.124</p></td>
+<td class="text-right"><p>50.770</p></td>
 </tr>
 <tr class="row-even"><td><p>reference</p></td>
 <td><p>EN</p></td>
 <td class="text-right"><p>1088</p></td>
 <td class="text-right"><p>0</p></td>
-<td class="text-right"><p>1.00%</p></td>
-<td class="text-right"><p>0.2732</p></td>
-<td class="text-right"><p>1.224</p></td>
-<td class="text-right"><p>0.5948</p></td>
-<td class="text-right"><p>6.526</p></td>
-<td class="text-right"><p>29.586</p></td>
+<td class="text-right"><p>1.25%</p></td>
+<td class="text-right"><p>0.1942</p></td>
+<td class="text-right"><p>0.863</p></td>
+<td class="text-right"><p>0.4501</p></td>
+<td class="text-right"><p>9.247</p></td>
+<td class="text-right"><p>41.769</p></td>
 </tr>
 <tr class="row-odd"><td><p>reference</p></td>
 <td><p>ZH</p></td>
 <td class="text-right"><p>2020</p></td>
 <td class="text-right"><p>0</p></td>
-<td class="text-right"><p>0.75%</p></td>
-<td class="text-right"><p>0.2425</p></td>
-<td class="text-right"><p>1.388</p></td>
-<td class="text-right"><p>0.5502</p></td>
-<td class="text-right"><p>5.757</p></td>
-<td class="text-right"><p>33.006</p></td>
+<td class="text-right"><p>0.66%</p></td>
+<td class="text-right"><p>0.1659</p></td>
+<td class="text-right"><p>0.953</p></td>
+<td class="text-right"><p>0.4081</p></td>
+<td class="text-right"><p>8.381</p></td>
+<td class="text-right"><p>48.285</p></td>
 </tr>
 </tbody>
 </table>
@@ -849,7 +864,7 @@ flags used for generation:</p>
 <th class="head"><p>Lang</p></th>
 <th class="head text-right"><p>Samples</p></th>
 <th class="head text-right"><p>Failed</p></th>
-<th class="head text-right"><p>Corpus WER</p></th>
+<th class="head text-right"><p>Corpus WER/CER</p></th>
 <th class="head text-right"><p>RTF Mean</p></th>
 <th class="head text-right"><p>Latency Mean (s)</p></th>
 <th class="head text-right"><p>Throughput (qps)</p></th>
@@ -861,46 +876,46 @@ flags used for generation:</p>
 <td><p>EN</p></td>
 <td class="text-right"><p>1088</p></td>
 <td class="text-right"><p>0</p></td>
-<td class="text-right"><p>0.93%</p></td>
-<td class="text-right"><p>0.2162</p></td>
-<td class="text-right"><p>1.019</p></td>
-<td class="text-right"><p>7.838</p></td>
-<td class="text-right"><p>37.071</p></td>
+<td class="text-right"><p>0.95%</p></td>
+<td class="text-right"><p>0.1413</p></td>
+<td class="text-right"><p>0.667</p></td>
+<td class="text-right"><p>11.965</p></td>
+<td class="text-right"><p>56.721</p></td>
 </tr>
 <tr class="row-odd"><td><p>text-only</p></td>
 <td><p>ZH</p></td>
 <td class="text-right"><p>2020</p></td>
 <td class="text-right"><p>0</p></td>
-<td class="text-right"><p>0.70%</p></td>
-<td class="text-right"><p>0.2096</p></td>
-<td class="text-right"><p>1.048</p></td>
-<td class="text-right"><p>7.625</p></td>
-<td class="text-right"><p>38.224</p></td>
+<td class="text-right"><p>0.64%</p></td>
+<td class="text-right"><p>0.1335</p></td>
+<td class="text-right"><p>0.668</p></td>
+<td class="text-right"><p>11.959</p></td>
+<td class="text-right"><p>60.040</p></td>
 </tr>
 <tr class="row-even"><td><p>reference</p></td>
 <td><p>EN</p></td>
 <td class="text-right"><p>1088</p></td>
 <td class="text-right"><p>0</p></td>
-<td class="text-right"><p>1.15%</p></td>
-<td class="text-right"><p>0.2380</p></td>
-<td class="text-right"><p>1.061</p></td>
-<td class="text-right"><p>7.523</p></td>
-<td class="text-right"><p>33.989</p></td>
+<td class="text-right"><p>1.26%</p></td>
+<td class="text-right"><p>0.1573</p></td>
+<td class="text-right"><p>0.696</p></td>
+<td class="text-right"><p>11.469</p></td>
+<td class="text-right"><p>51.688</p></td>
 </tr>
 <tr class="row-odd"><td><p>reference</p></td>
 <td><p>ZH</p></td>
 <td class="text-right"><p>2020</p></td>
 <td class="text-right"><p>0</p></td>
-<td class="text-right"><p>0.76%</p></td>
-<td class="text-right"><p>0.2009</p></td>
-<td class="text-right"><p>1.148</p></td>
-<td class="text-right"><p>6.963</p></td>
-<td class="text-right"><p>39.871</p></td>
+<td class="text-right"><p>0.67%</p></td>
+<td class="text-right"><p>0.1254</p></td>
+<td class="text-right"><p>0.718</p></td>
+<td class="text-right"><p>11.127</p></td>
+<td class="text-right"><p>63.931</p></td>
 </tr>
 </tbody>
 </table>
 </div>
-<p>All 12,432 requests completed successfully. Streaming returned its first audio payload in 0.46-0.59 seconds, while non-streaming retained higher complete-response throughput. The worst corpus WER was 1.15%.</p>
+<p>All 12,432 requests completed successfully. Streaming returned its first audio payload in 0.33-0.45 seconds, while non-streaming retained higher complete-response throughput. The worst corpus WER was 1.26%, and the worst corpus CER was 0.67%.</p>
 <p>Streaming playback continuity:</p>
 <div class="pst-scrollable-table-container"><table class="table">
 <thead>
@@ -938,8 +953,8 @@ flags used for generation:</p>
 </tr>
 <tr class="row-even"><td><p>reference</p></td>
 <td><p>EN</p></td>
-<td class="text-right"><p>1073</p></td>
-<td class="text-right"><p>15</p></td>
+<td class="text-right"><p>1072</p></td>
+<td class="text-right"><p>16</p></td>
 <td class="text-right"><p>0.0000</p></td>
 <td class="text-right"><p>0.0000</p></td>
 <td class="text-right"><p>100.00%</p></td>
@@ -959,8 +974,7 @@ flags used for generation:</p>
 </tbody>
 </table>
 </div>
-<p><code class="docutils literal notranslate"><span class="pre">N/A</span></code> means that a request returned one PCM payload, so it had no inter-payload seam to score.
-All 11,587 later seams had zero measured playback underrun.</p>
+<p><code class="docutils literal notranslate"><span class="pre">N/A</span></code> means that a request returned one PCM payload, so it had no inter-payload seam to score. Every scored slice has zero P95 and P99 measured playback underrun.</p>
 </section>
 </section>
 <section id="known-limitations">
@@ -1076,7 +1090,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Sep 10, 2026.
+  Last updated on Oct 15, 2026.
   <br/>
 </p>
   </div>
