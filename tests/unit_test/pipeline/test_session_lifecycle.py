@@ -7,10 +7,11 @@ from typing import Literal
 
 import pytest
 
-from sglang_omni.admission import QueueFullError
+from sglang_omni.admission import AdminDroppedRequestError, QueueFullError
 from sglang_omni.config.schema import replica_instance_name
 from sglang_omni.pipeline.coordinator import Coordinator
 from sglang_omni.proto import OmniRequest
+from sglang_omni.proto.messages import CompleteMessage
 from sglang_omni.proto.session import SessionLimits, TimedChunk
 from tests.unit_test.fixtures.session_pipeline import (
     PipelineResources,
@@ -30,7 +31,7 @@ async def test_timeout_cancel_noop_waits_before_close(linear_pair):
         OmniRequest(None, {"ignore_cancel": True, "delay": 0.3}),
         stages=["source", "sink"],
     )
-    coordinator.sessions[session_identity.session_id].limits = SessionLimits(
+    coordinator.sessions[session_identity.id].limits = SessionLimits(
         operation_timeout_s=0.1
     )
     output = coordinator.session_outputs(session_identity)
@@ -38,7 +39,7 @@ async def test_timeout_cancel_noop_waits_before_close(linear_pair):
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(anext(output), 5)
     await asyncio.wait_for(coordinator.close_session(session_identity), 5)
-    assert session_identity.session_id not in coordinator.sessions
+    assert session_identity.id not in coordinator.sessions
     log = event_log(events)
     finished = next(i for i, e in enumerate(log) if e[:2] == ("finished", "sink"))
     # Note (Junnan Li): Close waits for the hook that outlived the command timeout, then closes upstream.
@@ -126,6 +127,36 @@ async def test_worker_failure_wakes_output_and_fails_session(tmp_path, monkeypat
             await coordinator.open_session(OmniRequest(None), stages=["source", "sink"])
 
 
+@pytest.mark.parametrize("drop", ["stage_admin_drop", "coordinator_abort"])
+@pytest.mark.asyncio(loop_scope="session")
+async def test_aborted_append_closes_session_and_wakes_reader(
+    linear_pair: PipelineResources, drop: str
+) -> None:
+    coordinator, events, _ = linear_pair
+    session_identity = await coordinator.open_session(
+        OmniRequest(None, {"delay": 30}), stages=["source", "sink"]
+    )
+    output = coordinator.session_outputs(session_identity)
+    waiting = asyncio.create_task(anext(output))
+    await coordinator.append_session(session_identity, chunk(0))
+    await wait_until(
+        lambda: any(rid.startswith("session-") for rid in coordinator.requests)
+    )
+    request_id = next(rid for rid in coordinator.requests if rid.startswith("session-"))
+    if drop == "stage_admin_drop":
+        await coordinator.handle_completion(
+            CompleteMessage(
+                request_id, "sink", False, error=AdminDroppedRequestError.MESSAGE
+            )
+        )
+    else:
+        await coordinator.abort(request_id)
+    with pytest.raises(RuntimeError, match="session append was aborted"):
+        await asyncio.wait_for(waiting, 5)
+    await wait_until(lambda: session_identity.id not in coordinator.sessions)
+    assert [e[1] for e in event_log(events) if e[0] == "close"] == ["sink", "source"]
+
+
 @pytest.mark.asyncio
 async def test_public_subset_shutdown_closes_owners_despite_full_admission(tmp_path):
     async with pipeline(tmp_path) as (coordinator, events, processes):
@@ -172,9 +203,9 @@ async def test_output_overflow_closes_session(linear_pair):
         stages=["source", "sink"],
         limits=SessionLimits(max_output_chunks=1),
     )
-    state = coordinator.sessions[session_identity.session_id]
+    state = coordinator.sessions[session_identity.id]
     await coordinator.append_session(session_identity, chunk(0))
-    await wait_until(lambda: session_identity.session_id not in coordinator.sessions)
+    await wait_until(lambda: session_identity.id not in coordinator.sessions)
     assert isinstance(state.error, QueueFullError)
 
 
@@ -321,7 +352,7 @@ async def test_close_fences_queued_outputs(linear_pair):
     await coordinator.append_session(session_identity, chunk(0))
     first = await asyncio.wait_for(anext(output), 5)
     assert first.kind == "data"
-    session = coordinator.sessions[session_identity.session_id]
+    session = coordinator.sessions[session_identity.id]
     await coordinator.append_session(session_identity, chunk(1, eos=True))
     for _ in range(500):
         if session.outputs:
@@ -335,7 +366,7 @@ async def test_close_fences_queued_outputs(linear_pair):
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_stale_incarnation_cannot_address_the_reopened_session(
+async def test_stale_open_index_cannot_address_the_reopened_session(
     linear_pair,
 ) -> None:
     coordinator, _, _ = linear_pair
@@ -346,7 +377,7 @@ async def test_stale_incarnation_cannot_address_the_reopened_session(
     reopened = await coordinator.open_session(
         OmniRequest(None), stages=["source", "sink"], session_id="again"
     )
-    assert reopened.incarnation != session_identity.incarnation
+    assert reopened.open_index != session_identity.open_index
     with pytest.raises(ValueError, match="stale"):
         await coordinator.append_session(session_identity, chunk(0))
     with pytest.raises(ValueError, match="stale"):

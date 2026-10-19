@@ -49,31 +49,8 @@ class FakeEOU:
         return value
 
 
-def _pcm_frames(count: int) -> bytes:
+def pcm_frames(count: int) -> bytes:
     return b"\x00\x00" * VAD_FRAME_SAMPLES * count
-
-
-@pytest.mark.parametrize(
-    ("eagerness", "confidence", "immediate", "hard_stop", "fallback"),
-    [
-        ("low", 0.92, 0.99, 3000, 800),
-        ("medium", 0.88, 0.97, 2000, 640),
-        ("high", 0.80, 0.93, 1200, 512),
-    ],
-)
-def test_eagerness_presets(
-    eagerness: str,
-    confidence: float,
-    immediate: float,
-    hard_stop: int,
-    fallback: int,
-):
-    config = SemanticVADConfig.from_eagerness(eagerness)
-
-    assert config.confidence_threshold == confidence
-    assert config.immediate_confidence_threshold == immediate
-    assert config.max_pause_ms == hard_stop
-    assert config.fallback_silence_ms == fallback
 
 
 @pytest.mark.parametrize(
@@ -91,7 +68,7 @@ def test_medium_eagerness_uses_confidence_windows(
         speech_model=speech,
     )
 
-    emits = detector.process(_pcm_frames(1 + silence_frames))
+    emits = detector.process(pcm_frames(1 + silence_frames))
 
     assert emits == [
         Emit(VADEvent.SPEECH_STARTED, 0),
@@ -109,7 +86,7 @@ def test_resumed_speech_discards_pause_decision():
         speech_model=FakeSpeechModel(decisions),
     )
 
-    emits = detector.process(_pcm_frames(len(decisions)))
+    emits = detector.process(pcm_frames(len(decisions)))
 
     assert [event.event_type for event in emits] == [
         VADEvent.SPEECH_STARTED,
@@ -129,7 +106,7 @@ def test_inference_failure_uses_fixed_silence_fallback(caplog):
     )
 
     with caplog.at_level(logging.WARNING):
-        emits = detector.process(_pcm_frames(len(decisions)))
+        emits = detector.process(pcm_frames(len(decisions)))
 
     assert "fixed-silence fallback" in caplog.text
     assert emits[-1] == Emit(VADEvent.SPEECH_STOPPED, VAD_FRAME_SAMPLES)

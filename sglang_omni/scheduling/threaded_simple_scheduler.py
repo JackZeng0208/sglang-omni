@@ -8,9 +8,9 @@ import inspect
 import logging
 import queue as _queue_mod
 import threading
-import time
+from collections.abc import Coroutine
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any, Callable
+from typing import Callable, Generic, TypeVar
 
 from sglang_omni.scheduling.message import IncomingMessage, OutgoingMessage
 
@@ -20,7 +20,7 @@ _ABORTED_REQUEST_ID_LIMIT = 10000
 _ABORTED_REQUEST_ID_RETAINED = 5000
 
 
-class CountingInbox(_queue_mod.Queue):
+class CountingInbox(_queue_mod.Queue[IncomingMessage]):
     """Track queued and claimed ``new_request`` ids."""
 
     def _init(self, maxsize: int) -> None:
@@ -67,7 +67,11 @@ class CountingInbox(_queue_mod.Queue):
                 self.claimed_counts.pop(request_id, None)
 
 
-class ThreadedSimpleScheduler:
+ComputeInput = TypeVar("ComputeInput")
+ComputeResult = TypeVar("ComputeResult")
+
+
+class ThreadedSimpleScheduler(Generic[ComputeInput, ComputeResult]):
     """Run per-request work concurrently while preserving scheduler IO shape.
 
     This is meant for CPU-bound or blocking simple stages that previously used
@@ -86,13 +90,19 @@ class ThreadedSimpleScheduler:
 
     def __init__(
         self,
-        compute_fn: Callable | None,
+        compute_fn: (
+            Callable[
+                [ComputeInput], ComputeResult | Coroutine[None, None, ComputeResult]
+            ]
+            | None
+        ),
         *,
         max_concurrency: int | None = 8,
         abort_callback: Callable[[str], None] | None = None,
-        dispatch_fn: Callable[[Any], Future] | None = None,
+        dispatch_fn: Callable[[ComputeInput], Future[ComputeResult]] | None = None,
     ):
         self.lock = threading.Lock()
+        self.capacity_freed = threading.Condition(self.lock)
         self.inbox: CountingInbox = CountingInbox()
         self.outbox: _queue_mod.Queue[OutgoingMessage] = _queue_mod.Queue()
         self.requires_tp_work_fanout: bool = True
@@ -126,6 +136,9 @@ class ThreadedSimpleScheduler:
         self.running = False
         self.abort_callback = abort_callback
 
+    def warm_up_serving_thread(self) -> None:
+        pass
+
     def start(self) -> None:
         self.running = True
         try:
@@ -135,10 +148,7 @@ class ThreadedSimpleScheduler:
                     break
                 else:
                     pass
-                try:
-                    msg = self.inbox.get(timeout=0.1)
-                except _queue_mod.Empty:
-                    continue
+                msg = self.inbox.get()
                 if msg.type != "new_request":
                     continue
                 else:
@@ -167,7 +177,10 @@ class ThreadedSimpleScheduler:
                 pass
 
     def stop(self) -> None:
-        self.running = False
+        with self.capacity_freed:
+            self.running = False
+            self.capacity_freed.notify_all()
+        self.inbox.put(IncomingMessage(request_id="", type="wakeup"))
 
     def enqueue(self, msg: IncomingMessage) -> None:
         """Promote speculative aborts atomically with enqueue (scheduler lock first)."""
@@ -190,6 +203,7 @@ class ThreadedSimpleScheduler:
             future = self.pending.pop(request_id, None)
             if future is not None:
                 self.aborted_futures.add(future)
+                self.capacity_freed.notify()
             elif self.inbox.is_reachable(request_id):
                 self.queued_aborts.add(request_id)
             else:
@@ -246,15 +260,12 @@ class ThreadedSimpleScheduler:
             return
         else:
             pass
-        while self.running:
-            with self.lock:
-                if len(self.pending) < self.max_concurrency:
-                    return
-                else:
-                    pass
-            time.sleep(0.001)
+        with self.capacity_freed:
+            self.capacity_freed.wait_for(
+                lambda: not self.running or len(self.pending) < self.max_concurrency
+            )
 
-    def run_one(self, payload: Any) -> Any:
+    def run_one(self, payload: ComputeInput) -> ComputeResult:
         result = self.fn(payload)
         if inspect.isawaitable(result):
             result = asyncio.run(result)
@@ -262,10 +273,18 @@ class ThreadedSimpleScheduler:
             pass
         return result
 
+    def log_failure(self, request_id: str, exc: BaseException) -> None:
+        """Log a failed request from inside the handler of ``exc``."""
+        del exc
+        logger.exception(
+            "ThreadedSimpleScheduler: compute_fn failed for %s", request_id
+        )
+
     def finish(self, request_id: str, future: Future) -> None:
         with self.lock:
             if self.pending.get(request_id) is future:
                 self.pending.pop(request_id, None)
+                self.capacity_freed.notify()
             else:
                 pass
             aborted = future in self.aborted_futures
@@ -285,9 +304,7 @@ class ThreadedSimpleScheduler:
         try:
             result = future.result()
         except BaseException as exc:
-            logger.exception(
-                "ThreadedSimpleScheduler: compute_fn failed for %s", request_id
-            )
+            self.log_failure(request_id, exc)
             self.outbox.put(
                 OutgoingMessage(request_id=request_id, type="error", data=exc)
             )

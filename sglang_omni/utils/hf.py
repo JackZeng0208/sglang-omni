@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
 
 import torch.nn as nn
 from huggingface_hub import hf_hub_download
-from transformers import AutoConfig
+from transformers import AutoConfig, PretrainedConfig
+
+from sglang_omni.utils.json import JsonValue
 
 try:
     from transformers.initialization import no_init_weights
@@ -29,6 +31,7 @@ _CONFIG_MODEL_TYPE_TO_ARCH = {
     "qwen3_tts": "Qwen3TTSForConditionalGeneration",
     "voxtral_tts": "VoxtralTTSForConditionalGeneration",
     "zonos2": "Zonos2ForCausalLM",
+    "personaplex": "PersonaPlexForCausalLM",
 }
 
 _COSYVOICE3_LAYOUT_MARKER = "cosyvoice3.yaml"
@@ -37,9 +40,13 @@ _AUK_ARCHITECTURE = "AuKForConditionalGeneration"
 _AUK_CONFIG_NAMES = ("config.yaml", "config.yml")
 _AUK_MODEL_NAMES = frozenset({"auk", "auk-flash"})
 _AUK_WEIGHT_MARKERS = ("auk_base.safetensors", "auk_flash.safetensors")
+_PERSONAPLEX_ARCHITECTURE = "PersonaPlexForCausalLM"
+_PERSONAPLEX_LAYOUT_MARKER = "tokenizer_spm_32k_3.model"
+_MING3_DENSE_TTS_ARCHITECTURE = "Ming3DenseTTSForConditionalGeneration"
+_MING_OMNI_TTS_ARCHITECTURE = "BailingMMNativeForConditionalGeneration"
 
 
-def architecture_from_hf_config(hf_config: Any) -> str | None:
+def architecture_from_hf_config(hf_config: PretrainedConfig) -> str | None:
     """Prefer HF architectures; fall back to architecture/model_type."""
     archs = getattr(hf_config, "architectures", None)
     if archs:
@@ -61,6 +68,28 @@ def architecture_from_hf_config(hf_config: Any) -> str | None:
     else:
         pass
     return None
+
+
+MROPE_ONLY_KEYS = frozenset({"interleaved", "mrope_interleaved", "mrope_section"})
+
+
+def drop_mrope_keys(
+    rope_parameters: Mapping[str, JsonValue],
+) -> dict[str, JsonValue]:
+    """The rope parameters without the keys only MRoPE reads."""
+    return {
+        key: value
+        for key, value in rope_parameters.items()
+        if key not in MROPE_ONLY_KEYS
+    }
+
+
+def use_text_rope(config: PretrainedConfig) -> None:
+    """Drop the MRoPE-only rope keys so the runtime builds text RoPE."""
+    if config.rope_parameters is None:
+        pass
+    else:
+        config.rope_parameters = drop_mrope_keys(config.rope_parameters)
 
 
 def load_mistral_params_json(
@@ -152,6 +181,32 @@ def try_resolve_arch_from_nemo_config(
     return None
 
 
+def try_resolve_ming3_dense_tts(
+    model_path: str, revision: str | None = None
+) -> str | None:
+    """Route Ming-3.0-tts-0.5B away from Ming-Omni-TTS.
+
+    Both checkpoints advertise BailingMMNativeForConditionalGeneration. The
+    0.5B checkpoint is the dense Qwen2 layout, marked by model_type dense
+    and a ditar section. Ming-Omni-TTS does not have that layout.
+    """
+    raw = load_raw_config(model_path, revision)
+    if not isinstance(raw, dict) or raw.get("model_type") != "dense":
+        return None
+    else:
+        pass
+    if "ditar_config" not in raw or "audio_tokenizer_config" not in raw:
+        return None
+    else:
+        pass
+    architectures = raw.get("architectures") or []
+    if _MING_OMNI_TTS_ARCHITECTURE not in architectures:
+        return None
+    else:
+        pass
+    return _MING3_DENSE_TTS_ARCHITECTURE
+
+
 def try_resolve_arch_from_raw_config(
     model_path: str, revision: str | None = None
 ) -> str | None:
@@ -214,6 +269,33 @@ def try_resolve_arch_from_cosyvoice3_layout(
     except Exception:
         return None
     return _COSYVOICE3_ARCHITECTURE
+
+
+def try_resolve_arch_from_personaplex_layout(
+    model_path: str, revision: str | None = None
+) -> str | None:
+    """Resolve PersonaPlex (and its Moshi base) from the released layout.
+
+    The checkpoint carries no architectures entry; what identifies the family
+    is the Moshi text tokenizer shipped alongside model.safetensors.
+    """
+    if os.path.isfile(os.path.join(model_path, _PERSONAPLEX_LAYOUT_MARKER)):
+        return _PERSONAPLEX_ARCHITECTURE
+    else:
+        pass
+    if os.path.isdir(model_path):
+        return None
+    else:
+        pass
+    try:
+        hf_hub_download(
+            repo_id=model_path,
+            filename=_PERSONAPLEX_LAYOUT_MARKER,
+            revision=revision,
+        )
+    except (OSError, ValueError):
+        return None
+    return _PERSONAPLEX_ARCHITECTURE
 
 
 def auk_architecture_from_config(path: str) -> str | None:
@@ -286,7 +368,7 @@ def load_hf_config(
     *,
     trust_remote_code: bool = True,
     local_files_only: bool = True,
-) -> Any:
+) -> PretrainedConfig:
     """Load the HF config, preferring the local cache."""
     try:
         config_path = cached_file(
@@ -304,7 +386,9 @@ def load_hf_config(
     return cfg
 
 
-def instantiate_module(module_cls: type[nn.Module], config: Any) -> nn.Module:
+def instantiate_module(
+    module_cls: type[nn.Module], config: PretrainedConfig
+) -> nn.Module:
     """Instantiate a module without allocating its parameters."""
     with no_init_weights():
         if hasattr(module_cls, "_from_config"):

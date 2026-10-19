@@ -24,12 +24,12 @@ PREDICTOR_CYCLES = 1_000_000_000
 
 
 @pytest.fixture(autouse=True)
-def _require_cuda_for_accelerator_tests(request: pytest.FixtureRequest):
+def require_cuda_for_accelerator_tests(request: pytest.FixtureRequest):
     if request.node.get_closest_marker("accelerator") and not torch.cuda.is_available():
         pytest.skip("token id staging on a stream needs CUDA")
 
 
-def _runner(code_predictor_forward, device: torch.device) -> Qwen3TTSModelRunner:
+def make_runner(code_predictor_forward, device: torch.device) -> Qwen3TTSModelRunner:
     runner = Qwen3TTSModelRunner.__new__(Qwen3TTSModelRunner)
     runner.has_pending_code_step = False
     runner.token_id_host_bufs = None
@@ -43,7 +43,7 @@ def _runner(code_predictor_forward, device: torch.device) -> Qwen3TTSModelRunner
     return runner
 
 
-def _step(ids: torch.Tensor):
+def step(ids: torch.Tensor):
     batch_size = ids.shape[0]
     result = SimpleNamespace(
         next_token_ids=ids,
@@ -56,7 +56,12 @@ def _step(ids: torch.Tensor):
         positions=torch.full((batch_size,), 3, dtype=torch.long, device=ids.device),
     )
     requests = [
-        SimpleNamespace(request_id=f"r{row}", data=Qwen3TTSSGLangRequestData())
+        SimpleNamespace(
+            request_id=f"r{row}",
+            data=Qwen3TTSSGLangRequestData(
+                req=SimpleNamespace(inflight_middle_chunks=0)
+            ),
+        )
         for row in range(batch_size)
     ]
     return result, forward_batch, requests
@@ -64,15 +69,17 @@ def _step(ids: torch.Tensor):
 
 def test_collect_codes_stages_the_ids_before_the_predictor_runs():
     ids = torch.tensor([7, EOS, 9], dtype=torch.long)
-    result, forward_batch, requests = _step(ids)
+    result, forward_batch, requests = step(ids)
     staged_when_called = []
 
     def code_predictor_forward(layer0_codes, hidden, semantic_positions=None):
-        staged_when_called.append(result._host_token_ids)
+        staged_when_called.append(
+            result._host_token_ids
+        )  # noqa: leading-underscore  # production name
         runner.model.output_codes[:3] = layer0_codes + torch.arange(3)
         runner.model.output_embeds[:3] = layer0_codes.to(torch.float32)
 
-    runner = _runner(code_predictor_forward, torch.device("cpu"))
+    runner = make_runner(code_predictor_forward, torch.device("cpu"))
 
     runner.collect_codes(result, forward_batch, object(), requests)
 
@@ -95,6 +102,38 @@ def test_collect_codes_stages_the_ids_before_the_predictor_runs():
     assert requests[2].data.pending_feedback_queue[0].tolist() == [9.0, 9.0]
 
 
+def test_a_middle_prefill_chunk_adds_no_frame_feedback_or_stream_chunk():
+    ids = torch.tensor([7, 9], dtype=torch.long)
+    result, forward_batch, requests = step(ids)
+    requests[0].data.req.inflight_middle_chunks = 1
+
+    def code_predictor_forward(layer0_codes, hidden, semantic_positions=None):
+        runner.model.output_codes[:2] = layer0_codes + torch.arange(3)
+        runner.model.output_embeds[:2] = layer0_codes.to(torch.float32)
+
+    runner = make_runner(code_predictor_forward, torch.device("cpu"))
+    runner.collect_codes(result, forward_batch, object(), requests)
+    outputs = {
+        req.request_id: RequestOutput(req.request_id, data=int(ids[row]))
+        for row, req in enumerate(requests)
+    }
+    runner.post_process_outputs(result, SimpleNamespace(requests=requests), outputs)
+
+    assert requests[0].data.output_codes == []
+    assert len(requests[0].data.pending_feedback_queue) == 0
+    assert requests[0].data.latest_stream_code_chunk is None
+    assert [c.tolist() for c in requests[1].data.output_codes] == [[9, 10, 11]]
+    assert requests[1].data.latest_stream_code_chunk is not None
+
+
+def test_a_middle_prefill_chunk_does_not_advance_its_generation_step():
+    _, _, requests = step(torch.tensor([7, 9], dtype=torch.long))
+    requests[1].data.req.inflight_middle_chunks = 2
+    runner = Qwen3TTSModelRunner.__new__(Qwen3TTSModelRunner)
+
+    assert runner.finalize_skip_rids(SimpleNamespace(requests=requests)) == {"r1"}
+
+
 def test_lookahead_is_never_eligible():
     runner = Qwen3TTSModelRunner.__new__(Qwen3TTSModelRunner)
     history_free = SimpleNamespace(
@@ -115,12 +154,12 @@ def test_lookahead_is_never_eligible():
 def test_staged_ids_resolve_while_the_predictor_is_still_running():
     device = torch.device("cuda")
     ids = torch.tensor([7, 8], dtype=torch.long, device=device)
-    result, forward_batch, requests = _step(ids)
+    result, forward_batch, requests = step(ids)
 
     def code_predictor_forward(layer0_codes, hidden, semantic_positions=None):
-        torch.cuda._sleep(PREDICTOR_CYCLES)
+        torch.cuda._sleep(PREDICTOR_CYCLES)  # noqa: leading-underscore  # upstream name
 
-    runner = _runner(code_predictor_forward, device)
+    runner = make_runner(code_predictor_forward, device)
     stream = torch.cuda.current_stream(device)
 
     runner.collect_codes(result, forward_batch, object(), requests)
@@ -136,12 +175,12 @@ def test_staged_ids_resolve_while_the_predictor_is_still_running():
 def test_staged_ids_keep_the_sampled_values_when_later_stream_work_overwrites_them():
     device = torch.device("cuda")
     ids = torch.tensor([7, 8], dtype=torch.long, device=device)
-    result, forward_batch, requests = _step(ids)
+    result, forward_batch, requests = step(ids)
 
     def code_predictor_forward(layer0_codes, hidden, semantic_positions=None):
         layer0_codes.fill_(-1)
 
-    runner = _runner(code_predictor_forward, device)
+    runner = make_runner(code_predictor_forward, device)
 
     runner.collect_codes(result, forward_batch, object(), requests)
 

@@ -6,9 +6,8 @@ import hashlib
 import json
 import os
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
 
 import imageio.v3 as iio
 import numpy as np
@@ -17,7 +16,7 @@ import torch
 from PIL import Image, ImageOps
 
 from sglang_omni.client.client import Client
-from sglang_omni.client.types import GenerateRequest
+from sglang_omni.client.types import CompletionResult, GenerateRequest
 from sglang_omni.models.cosmos3.config import Cosmos3PipelineConfig
 from sglang_omni.pipeline.mp_runner import MultiProcessPipelineRunner
 from sglang_omni.utils.checkpoint import resolve_checkpoint
@@ -34,18 +33,23 @@ CASES = (
     "i2v_121",
     "video_continuation_53",
 )
-Records = dict[str, dict[str, Any]]
+SamplingFields = dict[str, str | bool | int | float]
 
 
-def write_json(path: Path, value: dict[str, Any]) -> None:
-    path.write_text(json.dumps(value, indent=2) + "\n")
+@dataclass(kw_only=True)
+class VisualResult:
+    path: str
+    shape: list[int]
+    sha256: str
+    request_wall_seconds: float
+    result: CompletionResult
 
 
-def build_requests(checkpoint: Path, directory: Path) -> Records:
+def build_requests(checkpoint: Path, directory: Path) -> dict[str, SamplingFields]:
     assets = checkpoint / "assets"
     prompt = json.dumps(json.loads((assets / "example_i2v_prompt.json").read_text()))
     negative = json.dumps(json.loads((assets / "negative_prompt.json").read_text()))
-    cases = {}
+    cases: dict[str, SamplingFields] = {}
     for name in CASES:
         large = name.endswith("121")
         width, height = (832, 480) if large else (448, 256)
@@ -57,7 +61,11 @@ def build_requests(checkpoint: Path, directory: Path) -> Records:
             if name.endswith("portrait"):
                 width, height = 256, 448
                 text = "A tall green plant in a white pot beside a window."
-        params = {
+            else:
+                pass
+        else:
+            pass
+        sampling_fields: SamplingFields = {
             "prompt": text,
             "negative_prompt": negative,
             "width": width,
@@ -83,40 +91,48 @@ def build_requests(checkpoint: Path, directory: Path) -> Records:
                     (width, height),
                     method=Image.Resampling.BILINEAR,
                 ).save(image_path)
-            params["image_path"] = str(image_path)
+            sampling_fields["image_path"] = str(image_path)
         elif name.startswith("video_continuation"):
-            params.update(
+            sampling_fields.update(
                 video_path=str(assets / "example_action_id_av_0_input.mp4"),
                 condition_video_keep="first",
             )
-        cases[name] = params
+        else:
+            pass
+        cases[name] = sampling_fields
     return cases
 
 
 async def run_arm(
-    checkpoint: Path, directory: Path, requests: Records, optimized: bool
-) -> Records:
+    checkpoint: Path,
+    directory: Path,
+    requests: dict[str, SamplingFields],
+    layerwise_offload: bool,
+) -> dict[str, VisualResult]:
     config = Cosmos3PipelineConfig(model_path=str(checkpoint))
     options = {"attention_backend": "torch_sdpa", "warmup_mode": "off"}
-    if optimized:
+    if layerwise_offload:
         options.update(
             component_residency={"transformer": "layerwise-offload"},
             layerwise_resident_layers={"transformer": 32},
         )
+    else:
+        pass
     config.stages[0].factory.server_args_overrides = options
     config.stages[0].factory.output_dir = str(directory / "media")
     directory.mkdir()
-    write_json(directory / "config.json", config.model_dump(mode="json"))
+    (directory / "config.json").write_text(config.model_dump_json(indent=2) + "\n")
     runner = MultiProcessPipelineRunner(config)
-    records = {}
+    records: dict[str, VisualResult] = {}
     try:
         await runner.start(timeout=900)
         client = Client(runner.coordinator)
-        for name, params in requests.items():
+        for name, sampling_fields in requests.items():
             started = time.perf_counter()
             result = await asyncio.wait_for(
                 client.completion(
-                    GenerateRequest(prompt=params, stream=False), request_id=name
+                    GenerateRequest(prompt=sampling_fields, stream=False),
+                    request_id=name,
                 ),
                 timeout=900,
             )
@@ -127,34 +143,44 @@ async def run_arm(
             pixels = iio.imread(path)
             if pixels.ndim == 3:
                 pixels = pixels[None]
+            else:
+                pass
             assert pixels.shape == (
-                params["num_frames"],
-                params["height"],
-                params["width"],
+                sampling_fields["num_frames"],
+                sampling_fields["height"],
+                sampling_fields["width"],
                 3,
             )
             assert pixels.dtype == np.uint8 and pixels.std() > 1
-            records[name] = {
-                "path": str(path),
-                "shape": list(pixels.shape),
-                "sha256": hashlib.sha256(pixels.tobytes()).hexdigest(),
-                "request_wall_s": elapsed,
-                "result": asdict(result),
-            }
-            write_json(directory / f"{name}.json", records[name])
+            records[name] = VisualResult(
+                path=str(path),
+                shape=list(pixels.shape),
+                sha256=hashlib.sha256(pixels.tobytes()).hexdigest(),
+                request_wall_seconds=elapsed,
+                result=result,
+            )
+            (directory / f"{name}.json").write_text(
+                json.dumps(asdict(records[name]), indent=2) + "\n"
+            )
     finally:
         await asyncio.wait_for(runner.stop(), timeout=90)
     for record in records.values():
-        assert Path(record["path"]).is_file(), "Successful output lost on shutdown"
+        assert Path(record.path).is_file(), "Successful output lost on shutdown"
     return records
 
 
 @pytest.fixture(scope="module")
-def visual_runs(tmp_path_factory: pytest.TempPathFactory) -> tuple[Records, Records]:
+def visual_runs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[dict[str, VisualResult], dict[str, VisualResult]]:
     if os.environ.get("RUN_COSMOS3_EDGE_TESTS") != "1":
         pytest.skip("Set RUN_COSMOS3_EDGE_TESTS=1 to load the official Edge checkpoint")
+    else:
+        pass
     if not torch.cuda.is_available():
         pytest.skip("Cosmos3 Edge generation requires CUDA")
+    else:
+        pass
     checkpoint = Path(resolve_checkpoint(os.environ.get("COSMOS3_EDGE_MODEL", EDGE)))
     directory = Path(
         os.environ.get("COSMOS3_TEST_OUTPUT")
@@ -162,18 +188,18 @@ def visual_runs(tmp_path_factory: pytest.TempPathFactory) -> tuple[Records, Reco
     ).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     requests = build_requests(checkpoint, directory)
-    write_json(directory / "requests.json", requests)
+    (directory / "requests.json").write_text(json.dumps(requests, indent=2) + "\n")
     baseline = asyncio.run(run_arm(checkpoint, directory / "baseline", requests, False))
-    optimized = asyncio.run(
-        run_arm(checkpoint, directory / "optimized", requests, True)
+    layerwise_offload = asyncio.run(
+        run_arm(checkpoint, directory / "layerwise_offload", requests, True)
     )
-    return baseline, optimized
+    return baseline, layerwise_offload
 
 
 @pytest.mark.parametrize("case", CASES)
 def test_visual_residency_preserves_decoded_pixels(
-    visual_runs: tuple[Records, Records], case: str
+    visual_runs: tuple[dict[str, VisualResult], dict[str, VisualResult]], case: str
 ) -> None:
     """Layerwise offload must not change the decoded pixels of any visual task."""
-    baseline, optimized = visual_runs
-    assert optimized[case]["sha256"] == baseline[case]["sha256"]
+    baseline, layerwise_offload = visual_runs
+    assert layerwise_offload[case].sha256 == baseline[case].sha256
