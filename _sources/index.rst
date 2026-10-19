@@ -49,6 +49,9 @@ Supported Models
    * - `inclusionAI/Ming-3.0-tts-tiny <https://huggingface.co/inclusionAI/Ming-3.0-tts-tiny>`_
      - TTS
      - 44.1 kHz voice cloning from one reference recording
+   * - `inclusionAI/Ming-3.0-tts-0.5B <https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5B>`_
+     - TTS
+     - Dense 0.5B backbone, 44.1 kHz voice cloning from one reference recording
    * - `dots-studio/dots.tts-mf <https://huggingface.co/dots-studio/dots.tts-mf>`_
      - TTS
      - 48 kHz continuous-latent TTS; also ``dots.tts-soar`` / ``dots.tts-base``
