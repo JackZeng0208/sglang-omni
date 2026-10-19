@@ -61,7 +61,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.1.8" />
-    <meta name="docbuild:last-update" content="Oct 15, 2026"/>
+    <meta name="docbuild:last-update" content="Oct 19, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -211,6 +211,7 @@
 <li class="toctree-l1 current active"><a class="current reference internal" href="#">🚀 Installation — Intel XPU</a></li>
 <li class="toctree-l1"><a class="reference internal" href="installation_cpu.html">🚀 Installation — Intel CPU</a></li>
 <li class="toctree-l1"><a class="reference internal" href="installation_musa.html">🚀 Installation — MUSA</a></li>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Cookbook</span></p>
 <ul class="nav bd-sidenav">
@@ -235,15 +236,20 @@
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/qwen3_omni.html">Qwen3-Omni</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/minicpm_o.html">MiniCPM-o</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/ming_omni.html">Ming-Omni</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/ming3_audio.html">Ming-3.0-audio-flash</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/ming3_tts.html">Ming-3.0-tts-tiny</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/ming3_asr.html">Ming-3.0-asr-tiny</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/nemotron_voicechat.html">NemotronLabs VoiceChat</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/personaplex.html">PersonaPlex</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/llada2_uni.html">LLaDA2.0-Uni</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/fun_cosyvoice3.html">Fun-CosyVoice3</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../cookbook/auk.html">AuK</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../cookbook/cosmos3_nano.html">Cosmos3 Nano serving</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">General Usage</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/qwen3_omni.html">Omni Model Usage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../basic_usage/native_chat_stage.html">Native Chat Stage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/audio_translations.html">Audio Translations</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/tts.html">TTS Model Usage</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/process_topology.html">Process Topology, Replicas, and GPU Sharing</a></li>
@@ -251,11 +257,7 @@
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/process_topology_migration.html">Process Topology Migration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/omni_router.html">SGLang-Omni Rust Router</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/mps_dp.html">Same-GPU Data Parallelism with CUDA MPS</a></li>
-</ul>
-<p aria-level="2" class="caption" role="heading"><span class="caption-text">Benchmarks</span></p>
-<ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../benchmarks/relay.html">Benchmark Relay</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../benchmarks/qwen3_tts_leading_silence.html">Qwen3-TTS Base: Leading Silence in X-Vector Voice Cloning</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../basic_usage/native_media_routes.html">Native Media Routes</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Developer Reference</span></p>
 <ul class="nav bd-sidenav">
@@ -524,13 +526,7 @@
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#whisper-asr-speech-to-text-single-xpu">Whisper ASR (speech-to-text, single XPU)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#fun-asr-nano-speech-to-text-single-xpu">Fun-ASR-Nano (speech-to-text, single XPU)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemotron-3-5-asr-speech-to-text-single-xpu">Nemotron 3.5 ASR (speech-to-text, single XPU)</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#qwen3-tts-text-to-speech-single-xpu">Qwen3-TTS (text-to-speech, single XPU)</a><ul class="nav section-nav flex-column">
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#base">Base</a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#customvoice">CustomVoice</a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#voicedesign">VoiceDesign</a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#codec-decoding-on-xpu">Codec decoding on XPU</a></li>
-</ul>
-</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#qwen3-tts-text-to-speech-single-xpu">Qwen3-TTS (text-to-speech, single XPU)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#auk-speech-generation-and-editing-single-xpu">AuK (speech generation and editing, single XPU)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#fun-cosyvoice3-text-to-speech-single-xpu">Fun-CosyVoice3 (text-to-speech, single XPU)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dots-tts-text-to-speech-single-xpu">dots.tts (text-to-speech, single XPU)</a></li>
@@ -737,8 +733,7 @@ pip<span class="w"> </span>install<span class="w"> </span>--no-deps<span class="
 pip<span class="w"> </span>install<span class="w"> </span>--no-deps<span class="w"> </span>qwen-tts<span class="o">==</span><span class="m">0</span>.1.1
 </pre></div>
 </div>
-<section id="base">
-<h4>Base<a class="headerlink" href="#base" title="Link to this heading">#</a></h4>
+<p><strong>Base</strong></p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sgl-omni<span class="w"> </span>serve<span class="w"> </span>--model-path<span class="w"> </span>/path/to/Qwen3-TTS-12Hz-1.7B-Base<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
 <span class="c1"># Base checkpoint clones a reference voice — pass ref_audio (+ ref_text):</span>
 curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8000/v1/audio/speech<span class="w"> </span><span class="se">\</span>
@@ -748,9 +743,7 @@ curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>
 <span class="s1">       "response_format":"wav"}'</span><span class="w"> </span>-o<span class="w"> </span>out.wav
 </pre></div>
 </div>
-</section>
-<section id="customvoice">
-<h4>CustomVoice<a class="headerlink" href="#customvoice" title="Link to this heading">#</a></h4>
+<p><strong>CustomVoice</strong></p>
 <p><code class="docutils literal notranslate"><span class="pre">CustomVoice</span></code> checkpoints synthesize speech with built-in speakers and need no reference audio. Use the matching config and select a speaker in the request:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sgl-omni<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--model-path<span class="w"> </span>Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice<span class="w"> </span><span class="se">\</span>
@@ -763,9 +756,7 @@ curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>
 <span class="s1">       "instructions":"Speak clearly and calmly.","response_format":"wav"}'</span><span class="w"> </span>-o<span class="w"> </span>out.wav
 </pre></div>
 </div>
-</section>
-<section id="voicedesign">
-<h4>VoiceDesign<a class="headerlink" href="#voicedesign" title="Link to this heading">#</a></h4>
+<p><strong>VoiceDesign</strong></p>
 <p>The <code class="docutils literal notranslate"><span class="pre">VoiceDesign</span></code> checkpoint synthesizes speech from text and a voice description, so it needs no reference audio. Serve it with its config:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sgl-omni<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--model-path<span class="w"> </span>Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign<span class="w"> </span><span class="se">\</span>
@@ -779,9 +770,7 @@ curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>
 <span class="s1">       "instructions":"A warm, natural young adult voice.","response_format":"wav"}'</span><span class="w"> </span>-o<span class="w"> </span>out.wav
 </pre></div>
 </div>
-</section>
-<section id="codec-decoding-on-xpu">
-<h4>Codec decoding on XPU<a class="headerlink" href="#codec-decoding-on-xpu" title="Link to this heading">#</a></h4>
+<p><strong>Codec decoding on XPU</strong></p>
 <p>The stateful incremental codec decoder runs, but the pipeline starts it with
 <code class="docutils literal notranslate"><span class="pre">async_decode:</span> <span class="pre">false</span></code>, and the vocoder captures its decode graphs during the
 asynchronous decode warmup, so none are captured. Capturing the shape set the CUDA
@@ -805,7 +794,6 @@ startup:</p>
 </div>
 <p>An explicit stage value wins over the pipeline default. See the platform-neutral
 defaults in <a class="reference internal" href="../cookbook/qwen3_tts.html"><span class="std std-doc">docs/cookbook/qwen3_tts.md</span></a>.</p>
-</section>
 </section>
 <section id="auk-speech-generation-and-editing-single-xpu">
 <h3>AuK (speech generation and editing, single XPU)<a class="headerlink" href="#auk-speech-generation-and-editing-single-xpu" title="Link to this heading">#</a></h3>
@@ -1163,13 +1151,7 @@ Qwen3-Omni thinker across 8 cards with tensor parallelism).</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#whisper-asr-speech-to-text-single-xpu">Whisper ASR (speech-to-text, single XPU)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#fun-asr-nano-speech-to-text-single-xpu">Fun-ASR-Nano (speech-to-text, single XPU)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#nemotron-3-5-asr-speech-to-text-single-xpu">Nemotron 3.5 ASR (speech-to-text, single XPU)</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#qwen3-tts-text-to-speech-single-xpu">Qwen3-TTS (text-to-speech, single XPU)</a><ul class="nav section-nav flex-column">
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#base">Base</a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#customvoice">CustomVoice</a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#voicedesign">VoiceDesign</a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#codec-decoding-on-xpu">Codec decoding on XPU</a></li>
-</ul>
-</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#qwen3-tts-text-to-speech-single-xpu">Qwen3-TTS (text-to-speech, single XPU)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#auk-speech-generation-and-editing-single-xpu">AuK (speech generation and editing, single XPU)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#fun-cosyvoice3-text-to-speech-single-xpu">Fun-CosyVoice3 (text-to-speech, single XPU)</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#dots-tts-text-to-speech-single-xpu">dots.tts (text-to-speech, single XPU)</a></li>
@@ -1215,7 +1197,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Oct 15, 2026.
+  Last updated on Oct 19, 2026.
   <br/>
 </p>
   </div>
