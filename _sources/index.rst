@@ -107,6 +107,7 @@ Supported Models
    :caption: Get Started
 
    get_started/installation.md
+   get_started/installation_apple_silicon.md
    get_started/installation_npu.md
    get_started/installation_xpu.md
    get_started/installation_cpu.md
@@ -172,6 +173,7 @@ Supported Models
    developer_reference/main.md
    developer_reference/apiserver_design.md
    developer_reference/pipeline.md
+   developer_reference/full_duplex_interactive_model.md
    developer_reference/config.md
    developer_reference/adding_parameters.md
    developer_reference/communication.md
