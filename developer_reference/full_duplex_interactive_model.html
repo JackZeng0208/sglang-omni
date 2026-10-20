@@ -260,6 +260,10 @@
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/mps_dp.html">Same-GPU Data Parallelism with CUDA MPS</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../basic_usage/native_media_routes.html">Native Media Routes</a></li>
 </ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">MLX</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../mlx/index.html">MLX Path</a></li>
+</ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Developer Reference</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="main.html">Architecture</a></li>
@@ -278,7 +282,6 @@
 <li class="toctree-l1"><a class="reference internal" href="asr_bench.html">ASR benchmark runbook</a></li>
 <li class="toctree-l1"><a class="reference internal" href="omni_offline_bench.html">MiniCPM-o offline benchmark runbook</a></li>
 <li class="toctree-l1"><a class="reference internal" href="rl_admin_control.html">RL Admin Control</a></li>
-<li class="toctree-l1"><a class="reference internal" href="mlx.html">MLX Path</a></li>
 <li class="toctree-l1"><a class="reference internal" href="ci_labels.html">CI Workflows and Labels</a></li>
 <li class="toctree-l1"><a class="reference internal" href="bump_version.html">Bumping the SGLang Pin</a></li>
 </ul>
@@ -678,6 +681,7 @@
 </table>
 </div>
 <p>While the server starts, the speech stage records the voice decoder as CUDA graphs for up to 8 conversations decoded together, or <code class="docutils literal notranslate"><span class="pre">max_sessions</span></code> if lower; the graphs hold GPU memory and add to startup time, and a voice whose reference audio is longer than the default voice’s is decoded without them.</p>
+<p>Speech settings also accept dotted CLI flags, such as <code class="docutils literal notranslate"><span class="pre">--speech.dtype</span> <span class="pre">float16</span> <span class="pre">--speech.n_timesteps</span> <span class="pre">10</span></code>. Stage settings use <code class="docutils literal notranslate"><span class="pre">--speech.factory.&lt;field&gt;</span></code> or <code class="docutils literal notranslate"><span class="pre">--speech.process</span></code>. The automatic thinker KV budget follows <code class="docutils literal notranslate"><span class="pre">thinker.engine.dtype</span></code> and <code class="docutils literal notranslate"><span class="pre">thinker.engine.kv_cache_dtype</span></code>; block-quantized KV caches require an explicit <code class="docutils literal notranslate"><span class="pre">thinker.engine.kv_cache_bytes</span></code> budget.</p>
 <p>A session holds at most 8192 tokens of history, which is the model’s trained context length. When that fills, the server sends <code class="docutils literal notranslate"><span class="pre">context_exhausted</span></code> and closes the session.</p>
 <p>The full-duplex server is ready when this returns JSON containing <code class="docutils literal notranslate"><span class="pre">&quot;native_full_duplex&quot;:true</span></code>:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>curl<span class="w"> </span>--fail<span class="w"> </span>http://localhost:8000/v1/realtime/capabilities
