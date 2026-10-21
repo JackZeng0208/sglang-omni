@@ -61,7 +61,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.1.8" />
-    <meta name="docbuild:last-update" content="Oct 20, 2026"/>
+    <meta name="docbuild:last-update" content="Oct 21, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -942,13 +942,14 @@ rejected from the author channel.</p>
 <section id="device-and-gpu-placement-contract">
 <h3>Device and GPU placement contract<a class="headerlink" href="#device-and-gpu-placement-contract" title="Link to this heading">#</a></h3>
 <p>A stage’s card is placement’s decision, made in the parent process from
-<code class="docutils literal notranslate"><span class="pre">stage.gpu</span></code> (or <code class="docutils literal notranslate"><span class="pre">processes.&lt;name&gt;.replica_devices</span></code> for a replicated process)
+<code class="docutils literal notranslate"><span class="pre">stage.gpu</span></code> (or <code class="docutils literal notranslate"><span class="pre">processes.&lt;name&gt;.replica_devices</span></code> when configured, including a single replica)
 and handed to the factory as <code class="docutils literal notranslate"><span class="pre">gpu_id</span></code>. The factory’s <code class="docutils literal notranslate"><span class="pre">device</span></code> argument is
 only ever a device type: <code class="docutils literal notranslate"><span class="pre">cpu</span></code> to keep a stage on the host, or a platform
 type such as <code class="docutils literal notranslate"><span class="pre">cuda</span></code>/<code class="docutils literal notranslate"><span class="pre">npu</span></code> that must match the host. It never carries an
 index. <code class="docutils literal notranslate"><span class="pre">cuda:1</span></code> in a config is refused, and so are <code class="docutils literal notranslate"><span class="pre">factory.gpu_id</span></code> and the
 two memory-fraction kwargs listed in <code class="docutils literal notranslate"><span class="pre">PLACEMENT_OWNED_FACTORY_KWARGS</span></code>
 (<code class="docutils literal notranslate"><span class="pre">sglang_omni/config/schema.py</span></code>), because those are injected by placement.</p>
+<p>Replica devices take precedence over stage GPU IDs regardless of YAML/CLI precedence. Expansion logs the overridden stage GPU and effective replica assignments; CPU stages are unchanged. No special GPU sentinel is needed.</p>
 <p>Inside a factory the two values meet in one helper:</p>
 <ol class="arabic simple">
 <li><p>Declare both parameters, <code class="docutils literal notranslate"><span class="pre">device:</span> <span class="pre">str</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></code> and
@@ -1121,7 +1122,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Oct 20, 2026.
+  Last updated on Oct 21, 2026.
   <br/>
 </p>
   </div>
