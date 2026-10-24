@@ -19,7 +19,7 @@ JsonObject = dict[str, JsonValue]
 SessionType = Literal["realtime", "transcription"]
 SessionState = Literal["CREATED", "OPEN", "CLOSING", "CLOSED"]
 MAX_EVENT_ID_LENGTH = 256
-Interaction = Literal["native"]
+Interaction = Literal["native", "turn_based"]
 TailPolicy = Literal["flush", "pad", "reject"]
 PartialStyle = Literal["append_only", "revising"]
 
@@ -76,6 +76,14 @@ class SamplingConfig(TypedDict, total=False):
     repetition_window_size: Annotated[int, Field(ge=1)]
     talker_temperature: Annotated[float, Field(ge=0, le=2)]
     talker_repetition_penalty: Annotated[float, Field(ge=1)]
+    talker_top_k: Annotated[int, Field(ge=-1)]
+    talker_top_p: Annotated[float, Field(gt=0, le=1)]
+    talker_max_new_tokens: Annotated[int, Field(ge=1)]
+    min_p: Annotated[float, Field(ge=0, le=1)]
+    audio_temperature: Annotated[float, Field(ge=0, le=2)]
+    audio_top_k: Annotated[int, Field(ge=-1)]
+    max_new_tokens: Annotated[int, Field(ge=1)]
+    seed: Annotated[int, Field(ge=0)]
 
 
 class AudioReference(BaseModel):
@@ -108,6 +116,7 @@ class SessionExtension(TypedDict, total=False):
     tail_policy: TailPolicy
     timebase: TimebaseConfig
     sampling: SamplingConfig
+    voice: str
     reference_audio: AudioReference
     tts_reference_audio: AudioReference
     max_slice_nums: Annotated[int, Field(ge=1)]
@@ -152,6 +161,7 @@ class GrantedCapabilities(TypedDict, total=False):
     strict_order: bool
     sampling_parameters: list[str]
     supports_reference_audio: bool
+    voices: list[str]
     limits: dict[str, int | float]
     rejections: list[Rejection]
 
@@ -202,6 +212,13 @@ class ImageAppendEvent(ClientEvent):
     sglang: ImageAppendMetadata
 
 
+class ConversationItemTruncateEvent(ClientEvent):
+    type: Literal["conversation.item.truncate"]
+    item_id: str
+    content_index: int
+    audio_end_ms: float
+
+
 class SessionCommandEvent(ClientEvent):
     type: Literal[
         "input_audio_buffer.clear",
@@ -209,14 +226,23 @@ class SessionCommandEvent(ClientEvent):
         "session.close",
         "input_audio_buffer.commit",
         "response.create",
+        "response.cancel",
     ]
 
 
 CLIENT_EVENT: TypeAdapter[
-    SessionUpdateEvent | AudioAppendEvent | ImageAppendEvent | SessionCommandEvent
+    SessionUpdateEvent
+    | AudioAppendEvent
+    | ImageAppendEvent
+    | ConversationItemTruncateEvent
+    | SessionCommandEvent
 ] = TypeAdapter(
     Annotated[
-        SessionUpdateEvent | AudioAppendEvent | ImageAppendEvent | SessionCommandEvent,
+        SessionUpdateEvent
+        | AudioAppendEvent
+        | ImageAppendEvent
+        | ConversationItemTruncateEvent
+        | SessionCommandEvent,
         Field(discriminator="type"),
     ]
 )

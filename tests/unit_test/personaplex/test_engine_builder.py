@@ -11,15 +11,17 @@ import pytest
 from sglang.srt.configs.model_config import get_hybrid_layer_ids, is_hybrid_swa_model
 from transformers import PretrainedConfig
 
-from sglang_omni.models.personaplex.architecture import TEMPORAL_TRANSFORMER
+from sglang_omni.models.personaplex.architecture import TEMPORAL_TRANSFORMER, TEXT_CARD
 from sglang_omni.models.personaplex.engine_builder import (
     PersonaPlexEngineBuilder,
+    PersonaPlexSessionEngineBuilder,
     shim_checkpoint_dir,
 )
 from sglang_omni.models.personaplex.hf_config import (
     DEFAULT_CONTEXT_LENGTH,
     build_backbone_config,
 )
+from sglang_omni.models.personaplex.lm_session import PersonaPlexSessionAdapter
 from sglang_omni.platforms import current_platform
 from sglang_omni.platforms.cpu import CPUOmniPlatform
 from sglang_omni.platforms.cuda import CUDAOmniPlatform
@@ -39,9 +41,11 @@ def test_builder_writes_backbone_config_and_links_only_lm_weights(
 ) -> None:
     source = write_checkpoint(tmp_path / "checkpoint")
     builder = (
-        PersonaPlexEngineBuilder()
+        PersonaPlexEngineBuilder(enable_async_decode=False)
         if context_length is None
-        else PersonaPlexEngineBuilder(context_length=context_length)
+        else PersonaPlexEngineBuilder(
+            enable_async_decode=False, context_length=context_length
+        )
     )
     expected_context = (
         DEFAULT_CONTEXT_LENGTH if context_length is None else context_length
@@ -76,7 +80,9 @@ def test_shim_requires_the_lm_weights(tmp_path):
 @pytest.mark.parametrize("is_cuda", [True, False])
 def test_generation_defaults_keep_the_runner_assumptions(monkeypatch, is_cuda):
     monkeypatch.setattr(current_platform, "is_cuda", lambda: is_cuda)
-    defaults = PersonaPlexEngineBuilder().generation_defaults(dtype="bfloat16")
+    defaults = PersonaPlexEngineBuilder(enable_async_decode=False).generation_defaults(
+        dtype="bfloat16"
+    )
     assert defaults["max_running_requests"] == 1
     assert defaults["chunked_prefill_size"] == -1
     assert defaults["disable_overlap_schedule"] is True
@@ -132,8 +138,24 @@ def test_window_kv_uses_resolved_device_and_cache_settings(
         resolved_configuration,
     )
     monkeypatch.setattr(f"{module}.override_server_args", record_override)
-    PersonaPlexEngineBuilder().customize_server_args(raw_server_args)
+    PersonaPlexEngineBuilder(enable_async_decode=False).customize_server_args(
+        raw_server_args
+    )
     if is_cuda_host and device == "cuda" and page_size == 1 and disable_radix_cache:
         assert declarations == []
     else:
         assert declarations == [("sglang_omni.personaplex.window_kv", True)]
+
+
+def test_realtime_engine_serves_calls_through_streaming_sessions():
+    tokenizer = object()
+    builder = PersonaPlexSessionEngineBuilder(
+        tokenizer=tokenizer, context_length=4096, enable_async_decode=False
+    )
+    defaults = builder.generation_defaults(dtype="bfloat16")
+    assert defaults["enable_streaming_session"] is True
+    assert defaults["disable_radix_cache"] is True
+    adapter = builder.extra_scheduler_kwargs()["session_adapter"]
+    assert isinstance(adapter, PersonaPlexSessionAdapter)
+    assert (adapter.vocab_size, adapter.context_length) == (TEXT_CARD, 4096)
+    assert adapter.tokenizer is tokenizer

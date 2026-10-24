@@ -51,7 +51,6 @@ class Qwen3ASRPipelineConfig(PipelineConfig):
     """Single-stage batched ASR pipeline for Qwen3-ASR checkpoints."""
 
     architecture: ClassVar[str] = "Qwen3ASRForConditionalGeneration"
-    freeze_api_gc_on_startup: ClassVar[bool] = True
     allow_audio_chunking: ClassVar[bool] = True
     max_native_clip_s: ClassVar[float] = float(QWEN3_ASR_MAX_INPUT_SECONDS)
     audio_chunking: AudioChunkingConfig = QWEN3_ASR_AUDIO_CHUNKING
@@ -101,6 +100,11 @@ class Qwen3ASRPipelineConfig(PipelineConfig):
             terminal=True,
         )
     ]
+
+    def resolved_stage_env_defaults(self, stage_name: str) -> dict[str, str]:
+        env_defaults = super().resolved_stage_env_defaults(stage_name)
+        env_defaults.setdefault("SGLANG_ENABLE_METADATA_GLUE_GRAPH", "1")
+        return env_defaults
 
     @property
     def resolved_audio_chunking(self) -> ResolvedAudioChunking:
