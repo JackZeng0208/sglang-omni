@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.2.0" />
-    <meta name="docbuild:last-update" content="Nov 17, 2026"/>
+    <meta name="docbuild:last-update" content="Nov 19, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -327,6 +327,10 @@
 </details></li>
 <li class="toctree-l1 has-children"><a class="reference internal" href="../cookbook/companies/dots_studio.html">Dots Studio</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="../cookbook/dots_tts.html">dots.tts</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../cookbook/companies/fireredteam.html">FireRedTeam</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../cookbook/firered_tts3.html">FireRedTTS3</a></li>
 </ul>
 </details></li>
 </ul>
@@ -744,7 +748,8 @@ an SGLang draft worker.</p>
 revision, the algorithm and its other <code class="docutils literal notranslate"><span class="pre">speculative_*</span></code> settings, the license
 and whether the model turns it on by default. A draft whose model card states
 no license stays off by default. No two entries share a draft repo. A stage
-that names a registry draft without a <code class="docutils literal notranslate"><span class="pre">speculative_draft_model_revision</span></code> key
+can have several drafts of one algorithm, and at most one of them is on by
+default. A stage that names a registry draft without a <code class="docutils literal notranslate"><span class="pre">speculative_draft_model_revision</span></code> key
 loads the entry’s revision. A revision the stage sets wins, and <code class="docutils literal notranslate"><span class="pre">none</span></code> loads
 the repo’s default branch. A cookbook command, an example config or a model’s
 defaults that serve the draft give that entry’s algorithm, draft repo and
@@ -1236,7 +1241,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Nov 17, 2026.
+  Last updated on Nov 19, 2026.
   <br/>
 </p>
   </div>

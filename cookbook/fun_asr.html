@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.2.0" />
-    <meta name="docbuild:last-update" content="Nov 17, 2026"/>
+    <meta name="docbuild:last-update" content="Nov 19, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -327,6 +327,10 @@
 </details></li>
 <li class="toctree-l1 has-children"><a class="reference internal" href="companies/dots_studio.html">Dots Studio</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="dots_tts.html">dots.tts</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="companies/fireredteam.html">FireRedTeam</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="firered_tts3.html">FireRedTTS3</a></li>
 </ul>
 </details></li>
 </ul>
@@ -606,7 +610,10 @@
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#torch-mps">Torch/MPS</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#server-configuration">Server Configuration</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#server-configuration">Server Configuration</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ascend-npu">Ascend NPU</a></li>
+</ul>
+</li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#transcribe-audio">Transcribe Audio</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#stream-transcription">Stream Transcription</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#request-parameters">Request Parameters</a></li>
@@ -662,12 +669,29 @@ SSE transcription are supported; quantized checkpoints are not.</p>
 </section>
 <section id="server-configuration">
 <h2>Server Configuration<a class="headerlink" href="#server-configuration" title="Link to this heading">#</a></h2>
-<p>Fun-ASR-Nano runs a single ASR stage on one GPU.</p>
+<p>Fun-ASR-Nano runs a single ASR stage on one accelerator.</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>sgl-omni<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--model-path<span class="w"> </span>FunAudioLLM/Fun-ASR-Nano-2512-hf<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span>
 </pre></div>
 </div>
+<section id="ascend-npu">
+<h3>Ascend NPU<a class="headerlink" href="#ascend-npu" title="Link to this heading">#</a></h3>
+<p>Prepare the runtime using the <a class="reference internal" href="#../get_started/installation_npu.md"><span class="xref myst">NPU installation guide</span></a>. The NPU example uses a pipeline configuration to collect the recommended NPU settings in one reusable launch command.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Recommended: use the model path from the config file</span>
+sgl-omni<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--config<span class="w"> </span>examples/configs/fun_asr_npu.yaml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span>
+
+<span class="c1"># Optional: override the config model_path with a local checkpoint</span>
+sgl-omni<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--config<span class="w"> </span>examples/configs/fun_asr_npu.yaml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--model-path<span class="w"> </span>/path/to/Fun-ASR-Nano-2512-hf<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span>
+</pre></div>
+</div>
+<p>The stage’s <code class="docutils literal notranslate"><span class="pre">gpu</span></code> value selects a logical device among the visible NPUs; for example, add <code class="docutils literal notranslate"><span class="pre">--asr.gpu</span> <span class="pre">1</span></code> to select the second visible NPU.</p>
+</section>
 </section>
 <section id="transcribe-audio">
 <h2>Transcribe Audio<a class="headerlink" href="#transcribe-audio" title="Link to this heading">#</a></h2>
@@ -776,6 +800,7 @@ text; it does not change the final transcript.</p>
 <li><p><strong>Latency.</strong> Streaming time to first text is 5% higher at concurrency 1 (13.7 against 13.0 ms median), lower at 4, and about 20% higher at 16. At 64 the median is 70% higher and p95 about the same.</p></li>
 <li><p><strong>Compilation.</strong> Torch compile is turned off under the draft: on SGLang 0.5.23 the compiled path makes the draft half as fast as no draft at concurrency 1. Without a draft it stays on, since it speeds up concurrency 1 by about 17%. A server with the draft therefore starts in about 30 s, against about 3 minutes without it.</p></li>
 <li><p><strong>Cost.</strong> The draft’s KV takes about 15% of the pool, and async decode is off.</p></li>
+<li><p><strong>Acceptance.</strong> Send the form field <code class="docutils literal notranslate"><span class="pre">return_spec_tokens_details=true</span></code> to get <code class="docutils literal notranslate"><span class="pre">sglext.spec_tokens_details</span></code> (<code class="docutils literal notranslate"><span class="pre">spec_accept_length</span></code>, <code class="docutils literal notranslate"><span class="pre">spec_accept_rate</span></code>, the draft counts and the per-verify histogram) on <code class="docutils literal notranslate"><span class="pre">json</span></code> and <code class="docutils literal notranslate"><span class="pre">verbose_json</span></code> responses and on the streamed <code class="docutils literal notranslate"><span class="pre">transcript.text.done</span></code> event. Audio long enough to be transcribed in chunks returns none.</p></li>
 </ul>
 <p>The 70-layer audio encoder takes a large share of each request, so the gain is well below the draft’s accept length of about 5.3 tokens per verify. Speedup over the same config without the draft, on one H200 with SGLang 0.5.23, two fresh servers per side in A B B A order, and 600 SeedTTS clips per language with the prefix cache off:</p>
 <div class="pst-scrollable-table-container"><table class="table">
@@ -1060,7 +1085,10 @@ request builder; explicit <code class="docutils literal notranslate"><span class
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#torch-mps">Torch/MPS</a></li>
 </ul>
 </li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#server-configuration">Server Configuration</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#server-configuration">Server Configuration</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ascend-npu">Ascend NPU</a></li>
+</ul>
+</li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#transcribe-audio">Transcribe Audio</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#stream-transcription">Stream Transcription</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#request-parameters">Request Parameters</a></li>
@@ -1101,7 +1129,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Nov 17, 2026.
+  Last updated on Nov 19, 2026.
   <br/>
 </p>
   </div>
