@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.2.0" />
-    <meta name="docbuild:last-update" content="Nov 19, 2026"/>
+    <meta name="docbuild:last-update" content="Nov 20, 2026"/>
   
     
     <script src="../../_static/searchtools.js"></script>
@@ -737,7 +737,10 @@ or a Python MLX reference) and use the same weights and MLX version.</p></li>
 <li><p>Keep the reference’s behavior. Behavior changes go in a separate PR.</p></li>
 <li><p>Report English WER, Chinese CER and mixed MER on the 392-clip corpus,
 reference vs native, plus the count of identical clips. Explain where
-differing clips diverge.</p></li>
+differing clips diverge. Report silence and noise separately: for each, count
+clips whose rendered transcript contains a letter or number. On an unrecorded
+chip neither count may exceed the reference chip’s count. Recorded chips
+still require exact matches.</p></li>
 </ul>
 <p><strong>Golden and pins</strong></p>
 <ul class="simple">
@@ -870,7 +873,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Nov 19, 2026.
+  Last updated on Nov 20, 2026.
   <br/>
 </p>
   </div>
