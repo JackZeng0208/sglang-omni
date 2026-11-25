@@ -64,7 +64,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.2.0" />
-    <meta name="docbuild:last-update" content="Nov 20, 2026"/>
+    <meta name="docbuild:last-update" content="Nov 25, 2026"/>
   
     
     <script src="../_static/searchtools.js"></script>
@@ -672,7 +672,7 @@
 </tr>
 <tr class="row-even"><td><p>Code that only the unit tests cover</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">run-unit-test-ci-only</span></code></p></td>
-<td><p>PR Test on H100. Not <code class="docutils literal notranslate"><span class="pre">intel-cpu-ci</span> <span class="pre">(unit_test/cpu)</span></code>.</p></td>
+<td><p>CPU unit tests on GitHub-hosted VMs and H100 accelerator unit tests. Not <code class="docutils literal notranslate"><span class="pre">intel-cpu-ci</span> <span class="pre">(unit_test/cpu)</span></code>.</p></td>
 </tr>
 <tr class="row-odd"><td><p>The Intel CPU or Intel GPU path</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">run-intel-cpu-ci</span></code> or <code class="docutils literal notranslate"><span class="pre">run-intel-xpu-ci</span></code></p></td>
@@ -732,13 +732,13 @@
 <td><p>Pull requests that change its Dockerfile, installer, pyproject files or workflows</p></td>
 </tr>
 <tr class="row-even"><td><p>Omni CI: PR Test</p></td>
-<td><p>H100</p></td>
-<td><p>The unit test suite twice: once with CUDA hidden, once for the tests that need a GPU</p></td>
+<td><p>GitHub-hosted Linux and H100</p></td>
+<td><p>Eight CPU unit-test partitions on Ubuntu VMs and two H100 accelerator partitions</p></td>
 <td><p>Any stage label except <code class="docutils literal notranslate"><span class="pre">run-mac-ci</span></code>, or a model label</p></td>
 </tr>
 <tr class="row-odd"><td><p>Omni CI: ASR</p></td>
 <td><p>H100</p></td>
-<td><p>Multi-speaker transcription and diarization with MOSS-Transcribe-Diarize, and SeedTTS English and Chinese word error rate and speed on Fun-ASR-Nano-2512, Qwen3-ASR-1.7B or Whisper-large-v3</p></td>
+<td><p>Multi-speaker transcription and diarization with MOSS-Transcribe-Diarize, and SeedTTS English and Chinese word error rate and speed on ARK-ASR-3B, Fun-ASR-Nano-2512, Qwen3-ASR-1.7B or Whisper-large-v3</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">run-asr-ci</span></code> for both jobs, or an ASR model label for the job that tests that model</p></td>
 </tr>
 <tr class="row-even"><td><p>Omni CI: TTS</p></td>
@@ -826,9 +826,9 @@
 </section>
 <section id="the-omni-ci-workflow">
 <h2>The Omni CI workflow<a class="headerlink" href="#the-omni-ci-workflow" title="Link to this heading">#</a></h2>
-<p>Omni CI runs PR Test and the seven H100 model stages. Its preflight job waits for lint, resolves the labels and draws the models once. A shared setup job then builds the virtualenv and downloads model weights. With every stage label, the stages run in this order:</p>
-<p>PR Test → ASR, TTS, Omni and Duplex side by side → MPS</p>
-<p>Only PR Test and the selected stages actually run; a stage that is not selected is skipped at once. ASR, TTS, Omni and Duplex start together as soon as PR Test finishes, whether it passed or not, and their jobs spread over whichever H100 runners are free. Jobs within a stage run side by side as well. TTS’s SeedTTS voice cloning job runs its non-streaming and streaming benchmarks one after the other, because its last check compares their results. MPS starts after the other selected stages finish: it tests the PR head commit instead of the merge commit, so it may rebuild the PR’s shared virtualenv, and that must not happen while another stage is using it. With <code class="docutils literal notranslate"><span class="pre">run-tts-ci</span></code> and <code class="docutils literal notranslate"><span class="pre">run-mps-ci</span></code>, the order is PR Test → TTS → MPS. A stage that fails does not stop any other stage. A failed setup job blocks every stage.</p>
+<p>Omni CI runs the hosted CPU unit tests (<code class="docutils literal notranslate"><span class="pre">unit-test-cpu-0</span></code> through <code class="docutils literal notranslate"><span class="pre">unit-test-cpu-7</span></code>), PR Test (<code class="docutils literal notranslate"><span class="pre">unit-test-accelerator-a/b</span></code>), and the seven H100 model stages. Its preflight job waits for lint, resolves the labels and draws the models once. After preflight, the eight GitHub-hosted CPU unit-test jobs start immediately in parallel with H100 shared setup (<code class="docutils literal notranslate"><span class="pre">setup</span></code> builds the virtualenv and downloads model weights), without waiting for or occupying H100 runners. With every stage label, the H100 stages run in this order:</p>
+<p>PR Test → ASR, TTS, MPS, Omni and Duplex side by side</p>
+<p>Only PR Test and the selected stages actually run; a stage that is not selected is skipped at once. ASR, TTS, MPS, Omni and Duplex start independently as soon as PR Test finishes, whether it passed or not, and their jobs spread over whichever H100 runners are free; they do not wait for the hosted CPU partitions. Jobs within a stage run side by side as well. TTS’s SeedTTS voice cloning job runs its non-streaming and streaming benchmarks one after the other, because its last check compares their results. MPS uses <code class="docutils literal notranslate"><span class="pre">github.sha</span></code> (the merge commit on a regular <code class="docutils literal notranslate"><span class="pre">pull_request</span></code> run), so it shares the same virtualenv and does not wait for TTS or other model stages. A stage that fails does not stop any other stage. A failed setup job blocks the H100 stages, while hosted CPU unit tests continue independently.</p>
 <section id="pr-test">
 <h3>PR Test<a class="headerlink" href="#pr-test" title="Link to this heading">#</a></h3>
 <div class="pst-scrollable-table-container"><table class="table">
@@ -838,24 +838,22 @@
 </tr>
 </thead>
 <tbody>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">unit-test-a</span></code></p></td>
-<td><p>First runtime-balanced partition of <code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">tests/</span> <span class="pre">-m</span> <span class="pre">&quot;not</span> <span class="pre">benchmark</span> <span class="pre">and</span> <span class="pre">not</span> <span class="pre">accelerator&quot;</span></code>, with CUDA hidden</p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">unit-test-cpu-0</span></code> through <code class="docutils literal notranslate"><span class="pre">unit-test-cpu-7</span></code></p></td>
+<td><p>Eight runtime-balanced partitions of <code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">tests/</span> <span class="pre">-m</span> <span class="pre">&quot;not</span> <span class="pre">benchmark</span> <span class="pre">and</span> <span class="pre">not</span> <span class="pre">accelerator&quot;</span></code> on separate GitHub-hosted Ubuntu VMs</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">unit-test-b</span></code></p></td>
-<td><p>Second runtime-balanced partition of the same CPU unit-test suite, with CUDA hidden</p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">unit-test-accelerator-a</span></code></p></td>
+<td><p>First runtime-balanced partition of <code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">tests/</span> <span class="pre">-m</span> <span class="pre">&quot;accelerator</span> <span class="pre">and</span> <span class="pre">not</span> <span class="pre">benchmark&quot;</span></code>, the unit tests that need a GPU</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">unit-test-c</span></code></p></td>
-<td><p>Third runtime-balanced partition of the same CPU unit-test suite, with CUDA hidden</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">unit-test-accelerator</span></code></p></td>
-<td><p><code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">tests/</span> <span class="pre">-m</span> <span class="pre">&quot;accelerator</span> <span class="pre">and</span> <span class="pre">not</span> <span class="pre">benchmark&quot;</span></code>, the unit tests that need a GPU</p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">unit-test-accelerator-b</span></code></p></td>
+<td><p>Second runtime-balanced partition of the same accelerator unit-test suite</p></td>
 </tr>
 </tbody>
 </table>
 </div>
-<p>The CPU partitions run as independent matrix jobs with fail-fast disabled. Files stay intact and are balanced using <code class="docutils literal notranslate"><span class="pre">.github/unit_test_durations.json</span></code>. Pytest discovers new tests automatically; files without a timing entry receive a one-second estimate, and new cases in an existing file stay in that file’s partition. Local pytest remains unpartitioned unless the CI plugin is explicitly loaded.</p>
-<p>The weights are per-file p90 elapsed estimates from three successful H100 A/B runs: <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/41197670240">41197670240</a>, <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/41161315193">41161315193</a> and <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/41140707601">41140707601</a>. Each file has three observations. The estimates aggregate timestamp intervals between completed pytest cases, excluding initial collection; they are not isolated setup/call/teardown measurements. These are PR runs with different revisions, not scheduled main-branch observations. The weights are a committed snapshot, not an automatically refreshed model.</p>
-<p><code class="docutils literal notranslate"><span class="pre">run-unit-test-ci-only</span></code> selects PR Test on H100 without selecting model or hardware stages. It does not run the Intel Xeon job <code class="docutils literal notranslate"><span class="pre">intel-cpu-ci</span> <span class="pre">(unit_test/cpu)</span></code>; that job needs <code class="docutils literal notranslate"><span class="pre">run-intel-cpu-ci</span></code> and the CPU path filter. Other stage labels remain additive, so keep them absent for unit tests only. Shared setup still runs, including model-weight provisioning. PR Test also runs whenever any other stage label selects a stage, the Intel hardware stages included. <code class="docutils literal notranslate"><span class="pre">run-mac-ci</span></code> and <code class="docutils literal notranslate"><span class="pre">run-lint-only</span></code> do not run PR Test or setup.</p>
+<p>Each CPU VM installs the dependencies for the checked-out revision in a fresh environment, runs its partition with retries, and uploads its JUnit report and attempt logs. The CPU and accelerator partitions run as independent matrix jobs with fail-fast disabled. Files stay intact and are balanced using <code class="docutils literal notranslate"><span class="pre">.github/unit_test_durations.json</span></code> for the CPU suite and <code class="docutils literal notranslate"><span class="pre">.github/unit_test_accelerator_durations.json</span></code> for the accelerator suite; a file with both kinds of test has a weight in each. Pytest discovers new tests automatically; files without a timing entry receive a one-second estimate, and new cases in an existing file stay in that file’s partition. Local pytest remains unpartitioned unless the CI plugin is explicitly loaded.</p>
+<p>The CPU weights are per-file p90 elapsed estimates from three successful H100 A/B runs: <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/41197670240">41197670240</a>, <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/41161315193">41161315193</a> and <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/41140707601">41140707601</a>. Each file has three observations. The estimates aggregate timestamp intervals between completed pytest cases, excluding initial collection; they are not isolated setup/call/teardown measurements. These are PR runs with different revisions, not scheduled main-branch observations. The weights are a committed snapshot, not an automatically refreshed model.</p>
+<p>The accelerator weights are per-file p90 estimates of the same kind, from the first attempt of three H100 accelerator jobs on 2026-11-21: <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/44939177878/job/136957056283">136957056283</a>, <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/44947746078/job/136979600046">136979600046</a> and <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/44948801830/job/136987314462">136987314462</a>. Each of those attempts stopped at a failure in <code class="docutils literal notranslate"><span class="pre">tests/unit_test/whisper_asr/test_draft_cuda_graph.py</span></code>, so that file and the five after it take their weights from three earlier successful jobs: <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/44925396141/job/136910764501">136910764501</a>, <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/44905131915/job/136849929132">136849929132</a> and <a class="reference external" href="https://github.com/sgl-project/sglang-omni/actions/runs/44905114597/job/136850113353">136850113353</a>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">run-unit-test-ci-only</span></code> selects the hosted CPU unit tests and H100 accelerator unit tests without selecting model or hardware stages. It does not run the Intel Xeon job <code class="docutils literal notranslate"><span class="pre">intel-cpu-ci</span> <span class="pre">(unit_test/cpu)</span></code>; that job needs <code class="docutils literal notranslate"><span class="pre">run-intel-cpu-ci</span></code> and the CPU path filter. Other stage labels remain additive, so keep them absent for unit tests only. Shared setup still runs for the accelerator unit tests, including model-weight provisioning. Both unit-test suites also run whenever any other stage label selects a stage, the Intel hardware stages included. <code class="docutils literal notranslate"><span class="pre">run-mac-ci</span></code> and <code class="docutils literal notranslate"><span class="pre">run-lint-only</span></code> do not run unit tests or setup.</p>
 </section>
 <section id="asr">
 <h3>ASR<a class="headerlink" href="#asr" title="Link to this heading">#</a></h3>
@@ -890,17 +888,22 @@
 <td><p><code class="docutils literal notranslate"><span class="pre">OpenMOSS-Team/MOSS-Transcribe-Diarize</span></code></p></td>
 <td><p>Its only model</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">run-fun-asr-nano-2512</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">run-ark-asr-3b</span></code></p></td>
+<td><p>SeedTTS ASR</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">AutoArk-AI/ARK-ASR-3B</span></code> with DFlash</p></td>
+<td><p>Yes</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">run-fun-asr-nano-2512</span></code></p></td>
 <td><p>SeedTTS ASR</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">FunAudioLLM/Fun-ASR-Nano-2512-hf</span></code></p></td>
 <td><p>Yes</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">run-qwen3-asr-1.7b</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">run-qwen3-asr-1.7b</span></code></p></td>
 <td><p>SeedTTS ASR</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">Qwen/Qwen3-ASR-1.7B</span></code></p></td>
 <td><p>Yes</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">run-whisper-large-v3</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">run-whisper-large-v3</span></code></p></td>
 <td><p>SeedTTS ASR</p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">openai/whisper-large-v3</span></code></p></td>
 <td><p>Yes</p></td>
@@ -1081,7 +1084,7 @@
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">run-cascaded-duplex</span></code></p></td>
 <td><p>Full-Duplex-Bench - cascaded</p></td>
-<td><p>Qwen3-ASR-1.7B, Qwen3.8-27B with thinking off and Qwen3-TTS Base cloning one Vivian recording, with server VAD, on two GPUs (<code class="docutils literal notranslate"><span class="pre">examples/streaming_cascade/profiles/qwen3-asr-qwen3.8-27b-vivian</span></code>)</p></td>
+<td><p>Qwen3-ASR-1.7B, Qwen3.8-27B with thinking off speaking through a <code class="docutils literal notranslate"><span class="pre">tts_start</span></code> tool, and Qwen3-TTS Base cloning one Vivian recording, with server VAD, on two GPUs (<code class="docutils literal notranslate"><span class="pre">examples/streaming_cascade/profiles/qwen3-asr-qwen3.8-27b-vivian-tts-tool</span></code>)</p></td>
 </tr>
 </tbody>
 </table>
@@ -1139,7 +1142,7 @@
 <td><p>Nothing self-hosted. The gates succeed.</p></td>
 </tr>
 <tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">run-unit-test-ci-only</span></code></p></td>
-<td><p>PR Test only, after shared setup.</p></td>
+<td><p>Hosted CPU unit tests and H100 accelerator unit tests only.</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">run-asr-ci</span></code></p></td>
 <td><p>PR Test, then both ASR jobs, SeedTTS ASR on a random model from its pool.</p></td>
@@ -1227,7 +1230,7 @@
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">unit-test</span></code>, <code class="docutils literal notranslate"><span class="pre">asr</span></code>, <code class="docutils literal notranslate"><span class="pre">tts</span></code>, <code class="docutils literal notranslate"><span class="pre">mps</span></code>, <code class="docutils literal notranslate"><span class="pre">omni</span></code>, <code class="docutils literal notranslate"><span class="pre">full-duplex</span></code>, <code class="docutils literal notranslate"><span class="pre">turn-based</span></code>, <code class="docutils literal notranslate"><span class="pre">cascaded</span></code>, <code class="docutils literal notranslate"><span class="pre">intel-cpu</span></code>, <code class="docutils literal notranslate"><span class="pre">intel-xpu</span></code>, <code class="docutils literal notranslate"><span class="pre">mac</span></code></p></td>
 <td><p>That stage’s label</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">moss-td-asr</span></code>, <code class="docutils literal notranslate"><span class="pre">fun-asr</span></code>, <code class="docutils literal notranslate"><span class="pre">qwen3-asr</span></code>, <code class="docutils literal notranslate"><span class="pre">whisper-asr</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">moss-td-asr</span></code>, <code class="docutils literal notranslate"><span class="pre">ark-asr</span></code>, <code class="docutils literal notranslate"><span class="pre">fun-asr</span></code>, <code class="docutils literal notranslate"><span class="pre">qwen3-asr</span></code>, <code class="docutils literal notranslate"><span class="pre">whisper-asr</span></code></p></td>
 <td><p>That ASR model’s label</p></td>
 </tr>
 <tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">higgs</span></code>, <code class="docutils literal notranslate"><span class="pre">moss</span></code>, <code class="docutils literal notranslate"><span class="pre">qwen3-tts</span></code>, <code class="docutils literal notranslate"><span class="pre">qwen3-tts-custom-voice</span></code>, <code class="docutils literal notranslate"><span class="pre">cosyvoice3</span></code></p></td>
@@ -1251,6 +1254,7 @@
 </ul>
 <p>It then re-runs all jobs of the newest completed run of each selected workflow on the current PR commit, unless GitHub requires workflow approval. If the newest run is still active, the command leaves it running and re-runs nothing older; run the command again once it finishes to apply the changed labels. Path filters and PR gates still apply.</p>
 <p><code class="docutils literal notranslate"><span class="pre">/tag-run-ci-label</span></code> accepts the same short targets but only updates labels; it also requires at least one target. Labels added by the bot do not start workflows; push a commit or use a tag-and-rerun command to start them. <code class="docutils literal notranslate"><span class="pre">/rerun-failed-ci</span></code> retries failed jobs without changing labels or stopping active runs. PR authors can use it on their own PRs.</p>
+<p>A bot keeps one comment on a pull request with the <code class="docutils literal notranslate"><span class="pre">/tag-and-rerun-ci</span></code> targets that test what it changes. For a changed model directory it names the targets of the stages a model label selects, and of the Full-Duplex-Bench job of MiniCPM-o, Qwen3-Omni and the streaming cascade. For code that every model shares it names <code class="docutils literal notranslate"><span class="pre">asr</span></code>, <code class="docutils literal notranslate"><span class="pre">tts</span></code> and <code class="docutils literal notranslate"><span class="pre">omni</span></code> until a model stage is selected. The comment follows the labels and commits, and a maintainer still starts every run.</p>
 </section>
 <section id="gate-messages">
 <h2>Gate messages<a class="headerlink" href="#gate-messages" title="Link to this heading">#</a></h2>
@@ -1382,7 +1386,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Nov 20, 2026.
+  Last updated on Nov 25, 2026.
   <br/>
 </p>
   </div>

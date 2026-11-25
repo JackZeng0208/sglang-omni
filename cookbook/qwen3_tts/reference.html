@@ -62,7 +62,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.2.0" />
-    <meta name="docbuild:last-update" content="Nov 20, 2026"/>
+    <meta name="docbuild:last-update" content="Nov 25, 2026"/>
   
     
     <script src="../../_static/searchtools.js"></script>
@@ -689,23 +689,27 @@
 <td><p><code class="docutils literal notranslate"><span class="pre">wav</span></code></p></td>
 <td><p>Explicit values override the default in every mode. HTTP streaming accepts <code class="docutils literal notranslate"><span class="pre">pcm</span></code> or <code class="docutils literal notranslate"><span class="pre">wav</span></code></p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">stream</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">sample_rate</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">null</span></code></p></td>
+<td><p>Requested output rate in Hz. Omit to encode the model’s native 24 kHz audio at a rate supported by the selected format. See <a class="reference internal" href="../../basic_usage/tts.html#request-parameters"><span class="std std-ref">output sample rates</span></a> for encoder restrictions</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">stream</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">false</span></code></p></td>
 <td><p>Stream raw WAV audio chunks by default; set <code class="docutils literal notranslate"><span class="pre">response_format=&quot;pcm&quot;</span></code> for raw PCM</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">stream_format</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">stream_format</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">audio</span></code></p></td>
 <td><p>Raw audio bytes by default; explicit <code class="docutils literal notranslate"><span class="pre">sse</span></code> enables SSE events even when <code class="docutils literal notranslate"><span class="pre">stream</span></code> is omitted</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">initial_codec_chunk_frames</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">initial_codec_chunk_frames</span></code></p></td>
 <td><p>ramp <code class="docutils literal notranslate"><span class="pre">1</span> <span class="pre">-&gt;</span> <span class="pre">2</span> <span class="pre">-&gt;</span> <span class="pre">4</span></code> when omitted</p></td>
 <td><p>First streaming vocoder chunk size in codec frames. An explicit value replaces the ramp’s first chunk only. Smaller values lower TTFA but underrun more easily; <code class="docutils literal notranslate"><span class="pre">0</span></code> uses the steady stride from the start</p></td>
 </tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">stream_codec_output</span></code></p></td>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">stream_codec_output</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">true</span></code></p></td>
 <td><p>Forward codec frames to the vocoder as they are generated. Set <code class="docutils literal notranslate"><span class="pre">false</span></code> to restore whole-utterance decoding for CustomVoice/VoiceDesign</p></td>
 </tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">suppress_bootstrap_silence</span></code></p></td>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">suppress_bootstrap_silence</span></code></p></td>
 <td><p><code class="docutils literal notranslate"><span class="pre">true</span></code></p></td>
 <td><p>Withhold the silent bootstrap codec frame’s audio from streamed CustomVoice output (validated voice/language pairs only, guarded by a runtime silence check). Set <code class="docutils literal notranslate"><span class="pre">false</span></code> to keep the leading silence</p></td>
 </tr>
@@ -826,6 +830,7 @@
 <section id="finish-reasons">
 <h2>Finish reasons<a class="headerlink" href="#finish-reasons" title="Link to this heading">#</a></h2>
 <p>Non-streaming responses include <code class="docutils literal notranslate"><span class="pre">X-Finish-Reason:</span> <span class="pre">stop</span></code> after codec EOS or <code class="docutils literal notranslate"><span class="pre">X-Finish-Reason:</span> <span class="pre">length</span></code> when generation reaches <code class="docutils literal notranslate"><span class="pre">max_new_tokens</span></code>. A <code class="docutils literal notranslate"><span class="pre">length</span></code> response still contains decodable audio, but the utterance may be incomplete. Models that do not report how generation ended send <code class="docutils literal notranslate"><span class="pre">X-Finish-Reason:</span> <span class="pre">unknown</span></code>. Batch responses expose the same value as each item’s <code class="docutils literal notranslate"><span class="pre">finish_reason</span></code>.</p>
+<p>When the talker reaches its generation limit, it emits an INFO log named <code class="docutils literal notranslate"><span class="pre">qwen3_tts_codec_budget_exhausted</span></code> with the request ID and generated codec frame count. Use this event to monitor budget stops across speech transports.</p>
 </section>
 <section id="dependency-troubleshooting">
 <h2>Dependency troubleshooting<a class="headerlink" href="#dependency-troubleshooting" title="Link to this heading">#</a></h2>
@@ -910,7 +915,7 @@ By SGLang-Omni Team
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Nov 20, 2026.
+  Last updated on Nov 25, 2026.
   <br/>
 </p>
   </div>
